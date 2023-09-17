@@ -135,34 +135,41 @@ impl Cpu {
 	fn execute(&mut self, memory: &mut Memory, instruction: Instruction) {
 		match instruction {
 			Instruction::Adc(value) => {
-				let (temp, overflowed_1) = u8::overflowing_add(self.a, value);
-				let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
-				
-				self.c = if overflowed_1 || overflowed_2 { 1 } else { 0 };
-				self.v = if (self.a & 0x80) != (result & 0x80) { 1 } else { 0 };
-				self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
-				self.z = if result == 0 { 1 } else { 0 };
-				// TODO: p if page crossed
-
-				self.a = result;
+				self.a = self.apply_adc_op(value);
 			},
 			Instruction::AslA => {
-				self.c = (self.a & 0x80) >> 7;
-				self.a = (self.a & 0x7F) << 1;
-				self.n = (self.a & 0x80) >> 7;
-				self.z = if self.a == 0 { 1 } else { 0 };
+				self.a = self.apply_asl_op(self.a);
 			},
 			Instruction::Asl(adress) => {
-				let mut value = memory.read(adress);
-
-				self.c = (value & 0x80) >> 7;
-				value = (value & 0x7F) << 1;
-				self.n = (value & 0x80) >> 7;
-				self.z = if value == 0 { 1 } else { 0 };
-
-				memory.write(adress, value);
+				let value = memory.read(adress);
+				
+				memory.write(adress, self.apply_asl_op(value));
 			},
 			Instruction::Nop => {}
 		}
+	}
+
+	fn apply_adc_op(&mut self, value: u8) -> u8 {
+		let (temp, overflowed_1) = u8::overflowing_add(value, value);
+		let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
+		
+		self.c = if overflowed_1 || overflowed_2 { 1 } else { 0 };
+		self.v = if (value & 0x80) != (result & 0x80) { 1 } else { 0 };
+		self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
+		self.z = if result == 0 { 1 } else { 0 };
+		// TODO: p if page crossed
+		
+		result
+	}
+
+	fn apply_asl_op(&mut self, value: u8) -> u8 {
+		self.c = (value & 0x80) >> 7;
+
+		let result = (value & 0x7F) << 1;
+
+		self.n = (result & 0x80) >> 7;
+		self.z = if result == 0 { 1 } else { 0 };
+
+		result
 	}
 }
