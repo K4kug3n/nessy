@@ -23,6 +23,9 @@ enum Instruction {
 	And(u8),
 	AslA,
 	Asl(u16),
+	Bcc(i8),
+	Bcs(i8),
+	Beq(i8),
 	Nop
 }
 
@@ -59,6 +62,12 @@ impl Cpu {
 		let value = memory.read(self.pc);
 		self.pc += 1;
 		value
+	}
+
+	fn fetch_relative(&mut self, memory: &Memory) -> i8 {
+		let adress = self.fetch(memory);
+
+		i8::try_from(i16::from(adress) - 128).unwrap() 
 	}
 
 	fn fetch_absolute_adress(&mut self, memory: &Memory) -> u16 {
@@ -125,8 +134,14 @@ impl Cpu {
 			0x1E => Instruction::Asl(self.fetch_x_indexed_absolute_adress(memory)),
 			0x06 => Instruction::Asl(self.fetch_zero_page_adress(memory)),
 			0x16 => Instruction::Asl(self.fetch_x_indexed_zero_page_adress(memory)),
+			
+			0x90 => Instruction::Bcc(self.fetch_relative(memory)),
+			0xB0 => Instruction::Bcs(self.fetch_relative(memory)),
+			0xF0 => Instruction::Beq(self.fetch_relative(memory)),
 
-			_ => Instruction::Nop
+			_ => {
+				panic!("Opcode '{}' not implemented", opcode)
+			}
 		}
 	}
 
@@ -146,6 +161,15 @@ impl Cpu {
 				
 				memory.write(adress, self.apply_asl_op(value));
 			},
+			Instruction::Bcc(offset) => {
+				self.pc = self.apply_bcc_op(self.pc, offset);
+			},
+			Instruction::Bcs(offset) => {
+				self.pc = self.apply_bcs_op(self.pc, offset);
+			},
+			Instruction::Beq(offset) => {
+				self.pc = self.apply_beq_op(self.pc, offset);
+			},
 			Instruction::Nop => {}
 		}
 	}
@@ -158,7 +182,6 @@ impl Cpu {
 		self.v = if (value & 0x80) != (result & 0x80) { 1 } else { 0 };
 		self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
 		self.z = if result == 0 { 1 } else { 0 };
-		// TODO: p if page crossed
 		
 		result
 	}
@@ -168,7 +191,6 @@ impl Cpu {
 
 		self.z = if result == 0 { 1 } else { 0 };
 		self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
-		// TODO: p if page crossed
 
 		result
 	}
@@ -182,5 +204,29 @@ impl Cpu {
 		self.z = if result == 0 { 1 } else { 0 };
 
 		result
+	}
+
+	fn apply_bcc_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.c == 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_bcs_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.c == 1 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_beq_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.z == 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
 	}
 }
