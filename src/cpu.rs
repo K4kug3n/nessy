@@ -18,19 +18,9 @@ pub struct Cpu {
 	c: u8,
 }
 
-// enum AddrMode {
-// 	Immediate,
-// 	ZeroPage,
-// 	ZeroPageX,
-// 	Absolute,
-// 	AbsoluteX,
-// 	AbsoluteY,
-// 	IndirectX,
-// 	IndirectY
-// }
-
 enum Instruction {
 	Adc(u8),
+	And(u8),
 	AslA,
 	Asl(u16),
 	Nop
@@ -76,57 +66,65 @@ impl Cpu {
 		u16::from(self.fetch(memory)) + (u16::from(self.fetch(memory)) << 8)
 	}
 
+	fn fetch_x_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
+		self.fetch_absolute_adress(memory) + u16::from(self.x)
+	}
+
+	fn fetch_y_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
+		self.fetch_absolute_adress(memory) + u16::from(self.y)
+	}
+
+	fn fetch_zero_page_adress(&mut self, memory: &Memory) -> u16 {
+		u16::from(self.fetch(memory))
+	}
+
+	fn fetch_x_indexed_zero_page_adress(&mut self, memory: &Memory) -> u16 {
+		(self.fetch_zero_page_adress(memory) + u16::from(self.x)) & 0x00ff
+	}
+
+	fn fetch_x_indexed_zero_page_indirect_adress(&mut self, memory: &Memory) -> u16 {
+		let indirect = self.fetch_x_indexed_zero_page_adress(memory);
+		
+		debug_assert!(((indirect+1) & 0xff00) == 0); // Next memory loc must be on zero page
+
+		// Little endian
+		u16::from(memory.read(indirect)) + (u16::from(memory.read(indirect+1)) << 8)
+	}
+
+	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, memory: &Memory) -> u16 {
+		let indirect = self.fetch_zero_page_adress(memory);
+
+		// Little endian
+		let adress = u16::from(memory.read(indirect)) + (u16::from(memory.read(indirect+1)) << 8);
+
+		adress + u16::from(self.y)
+	}
+
 	fn decode(&mut self, memory: &Memory, opcode: u8) -> Instruction {
 		match opcode {
 			0x69 => Instruction::Adc(self.fetch(memory)),
-			0x65 => {
-				let adress = u16::from(self.fetch(memory));
-				Instruction::Adc(memory.read(adress))
-			},
-			0x75 => {
-				Instruction::Adc(memory.read(u16::from(self.fetch(memory)) + u16::from(self.x)))
-			},
-			0x6D => {
-				let adress = self.fetch_absolute_adress(memory);
-				Instruction::Adc(memory.read(adress))
-			},
-			0x7D => {
-				let adress = self.fetch_absolute_adress(memory);
-				Instruction::Adc(memory.read(adress + u16::from(self.x)))
-			},
-			0x79 => {
-				let adress = self.fetch_absolute_adress(memory);
-				Instruction::Adc(memory.read(adress + u16::from(self.y)))
-			},
-			0x61 => {
-				let adress = (u16::from(self.fetch(memory)) + u16::from(self.x)) & 0x00ff;
-				Instruction::Adc(memory.read(adress))
-			},
-			0x71 => {
-				let indirect = u16::from(self.fetch(memory));
-				let adress = u16::from(memory.read(indirect)) + (u16::from(memory.read(indirect+1)) << 8);
-				Instruction::Adc(memory.read(adress + u16::from(self.y)))
-			},
+			0x6D => Instruction::Adc(memory.read(self.fetch_absolute_adress(memory))),
+			0x7D => Instruction::Adc(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
+			0x79 => Instruction::Adc(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
+			0x65 => Instruction::Adc(memory.read(self.fetch_zero_page_adress(memory))),
+			0x75 => Instruction::Adc(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
+			0x61 => Instruction::Adc(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
+			0x71 => Instruction::Adc(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
 			
-			0x0A => {
-				Instruction::AslA
-			},
-			0x0E => {
-				let adress = self.fetch_absolute_adress(memory);
-				Instruction::Asl(adress)
-			},
-			0x1E => {
-				let adress = self.fetch_absolute_adress(memory);
-				Instruction::Asl(adress + u16::from(self.x))
-			},
-			0x06 => {
-				let adress = u16::from(self.fetch(memory));
-				Instruction::Asl(adress)
-			},
-			0x16 => {
-				let adress = (u16::from(self.fetch(memory)) + u16::from(self.x)) & 0x00ff;
-				Instruction::Asl(adress)
-			},
+			0x29 => Instruction::And(self.fetch(memory)),
+			0x2D => Instruction::And(memory.read(self.fetch_absolute_adress(memory))),
+			0x3D => Instruction::And(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
+			0x39 => Instruction::And(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
+			0x25 => Instruction::And(memory.read(self.fetch_zero_page_adress(memory))),
+			0x35 => Instruction::And(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
+			0x21 => Instruction::And(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
+			0x31 => Instruction::And(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
+
+			0x0A => Instruction::AslA,
+			0x0E => Instruction::Asl(self.fetch_absolute_adress(memory)),
+			0x1E => Instruction::Asl(self.fetch_x_indexed_absolute_adress(memory)),
+			0x06 => Instruction::Asl(self.fetch_zero_page_adress(memory)),
+			0x16 => Instruction::Asl(self.fetch_x_indexed_zero_page_adress(memory)),
 
 			_ => Instruction::Nop
 		}
@@ -137,6 +135,9 @@ impl Cpu {
 			Instruction::Adc(value) => {
 				self.a = self.apply_adc_op(value);
 			},
+			Instruction::And(value) => {
+				self.a = self.apply_and_op(value);
+			}
 			Instruction::AslA => {
 				self.a = self.apply_asl_op(self.a);
 			},
@@ -159,6 +160,16 @@ impl Cpu {
 		self.z = if result == 0 { 1 } else { 0 };
 		// TODO: p if page crossed
 		
+		result
+	}
+
+	fn apply_and_op(&mut self, value: u8) -> u8 {
+		let result = self.a & value;
+
+		self.z = if result == 0 { 1 } else { 0 };
+		self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
+		// TODO: p if page crossed
+
 		result
 	}
 
