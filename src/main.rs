@@ -1,3 +1,7 @@
+use nessy::nes::Nes;
+
 fn main() {
-    println!("Hello, world!");
+    let mut nes = Nes::new();
+
+    nes.play();
 }
