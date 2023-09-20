@@ -2,18 +2,18 @@ use crate::memory::Memory;
 
 pub struct Cpu {
 	pc: u16,
-	sp: u8,
+	//sp: u8,
 
-	p: u8,
+	//p: u8,
 	a: u8,
 	x: u8,
 	y: u8,
 
 	n: u8,
 	v: u8,
-	b: u8,
-	d: u8,
-	i: u8,
+	//b: u8,
+	//d: u8,
+	//i: u8,
 	z: u8,
 	c: u8,
 }
@@ -33,18 +33,18 @@ impl Cpu {
 	pub fn new() -> Cpu {
 		Cpu {
 			pc: 0,
-			sp: 255,
+			//sp: 255,
 
-			p: 0,
+			//p: 0,
 			a: 0,
 			x: 0,
 			y: 0,
 
 			n: 0,
 			v: 0,
-			b: 0,
-			d: 0,
-			i: 0,
+			//b: 0,
+			//d: 0,
+			//i: 0,
 			z: 0,
 			c: 0
 		}
@@ -139,6 +139,8 @@ impl Cpu {
 			0xB0 => Instruction::Bcs(self.fetch_relative(memory)),
 			0xF0 => Instruction::Beq(self.fetch_relative(memory)),
 
+			0xEA => Instruction::Nop,
+
 			_ => {
 				panic!("Opcode '{}' not implemented", opcode)
 			}
@@ -178,10 +180,10 @@ impl Cpu {
 		let (temp, overflowed_1) = u8::overflowing_add(value, value);
 		let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
 		
-		self.c = if overflowed_1 || overflowed_2 { 1 } else { 0 };
-		self.v = if (value & 0x80) != (result & 0x80) { 1 } else { 0 };
-		self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
-		self.z = if result == 0 { 1 } else { 0 };
+		self.c = u8::from(overflowed_1 || overflowed_2);
+		self.v = u8::from((value & 0x80) != (result & 0x80));
+		self.n = u8::from(result & 0x80 == 0x80);
+		self.z = u8::from(result == 0);
 		
 		result
 	}
@@ -189,8 +191,8 @@ impl Cpu {
 	fn apply_and_op(&mut self, value: u8) -> u8 {
 		let result = self.a & value;
 
-		self.z = if result == 0 { 1 } else { 0 };
-		self.n = if result & 0x80 == 0x80 { 1 } else { 0 };
+		self.z = u8::from(result == 0);
+		self.n = u8::from(result & 0x80 == 0x80);
 
 		result
 	}
@@ -201,7 +203,7 @@ impl Cpu {
 		let result = (value & 0x7F) << 1;
 
 		self.n = (result & 0x80) >> 7;
-		self.z = if result == 0 { 1 } else { 0 };
+		self.z = u8::from(result == 0);
 
 		result
 	}
