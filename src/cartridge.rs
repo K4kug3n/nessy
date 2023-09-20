@@ -12,9 +12,9 @@ pub enum Mirroring {
 }
 
 impl Cartridge {
-	pub fn from_ines(buffer: &Vec<u8>) -> Cartridge {
+	pub fn from_ines(buffer: &[u8]) -> Cartridge {
 		if buffer[0..=3] != [0x4e, 0x45, 0x53, 0x1a] {
-			panic!("[Header] Wrong constants")
+			panic!("Wrong constants")
 		}
 
 		let pgr_rom_size = usize::from(buffer[4]) * 16384;
@@ -37,13 +37,13 @@ impl Cartridge {
 		let flag_7 = buffer[7];
 		//let vs_unisystem = flag_7 & 0x01;
 		//let play_choice_10 = flag_7 & 0x2;
-		let nes_2 = flag_7 & 0x0c;
+		let nes_2 = (flag_7 & 0x0c) != 0;
 
-		if nes_2 != 0 {
+		if nes_2 {
 			panic!("NES 2.0 cartridge not supported")
 		}
 
-		let high_mapper = if /*nes_2 == 0 &&*/ buffer[12..=15] != [0x0, 0x0, 0x0, 0x0] { 0x0 } else { flag_7 & 0xf0 };
+		let high_mapper = if /* !nes_2 && */ buffer[12..=15] != [0x0, 0x0, 0x0, 0x0] { 0x0 } else { flag_7 & 0xf0 };
 
 		let pgr_rom_idx = usize::from(if trainer { 512u16 + 16u16 } else { 16u16 });
 		let chr_rom_idx = pgr_rom_idx + pgr_rom_size;
