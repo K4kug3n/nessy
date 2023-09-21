@@ -26,6 +26,10 @@ enum Instruction {
 	Bcc(i8),
 	Bcs(i8),
 	Beq(i8),
+	Bit(u8),
+	Bmi(i8),
+	Bne(i8),
+	Bpl(i8),
 	Nop
 }
 
@@ -139,6 +143,13 @@ impl Cpu {
 			0xB0 => Instruction::Bcs(self.fetch_relative(memory)),
 			0xF0 => Instruction::Beq(self.fetch_relative(memory)),
 
+			0x24 => Instruction::Bit(memory.read(self.fetch_zero_page_adress(memory))),
+			0x2C => Instruction::Bit(memory.read(self.fetch_absolute_adress(memory))),
+
+			0x30 => Instruction::Bmi(self.fetch_relative(memory)),
+			0xD0 => Instruction::Bne(self.fetch_relative(memory)),
+			0x10 => Instruction::Bpl(self.fetch_relative(memory)),
+
 			0xEA => Instruction::Nop,
 
 			_ => {
@@ -171,6 +182,18 @@ impl Cpu {
 			},
 			Instruction::Beq(offset) => {
 				self.pc = self.apply_beq_op(self.pc, offset);
+			},
+			Instruction::Bit(value) => {
+				self.apply_bit_op(value);
+			},
+			Instruction::Bmi(offset) => {
+				self.pc = self.apply_bmi_op(self.pc, offset);
+			},
+			Instruction::Bne(offset) => {
+				self.pc = self.apply_bne_op(self.pc, offset);
+			},
+			Instruction::Bpl(offset) => {
+				self.pc = self.apply_bpl_op(self.pc, offset);
 			},
 			Instruction::Nop => {}
 		}
@@ -217,7 +240,7 @@ impl Cpu {
 	}
 
 	fn apply_bcs_op(&mut self, pc: u16, offset: i8) -> u16 {
-		if self.c == 1 {
+		if self.c != 0 {
 			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
 		}
 		
@@ -225,7 +248,38 @@ impl Cpu {
 	}
 
 	fn apply_beq_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.z != 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_bit_op(&mut self, value: u8) {
+		self.n = (value & 0x80) >> 7;
+		self.v = (value & 0x40) >> 6;
+
+		self.z = u8::from((self.a & value) == 0);
+	}
+
+	fn apply_bmi_op(&mut self, pc: u16, offset: i8) -> u16 {	
+		if self.n != 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_bne_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.z == 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_bpl_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.n == 0 {
 			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
 		}
 		
