@@ -2,18 +2,17 @@ use crate::memory::Memory;
 
 pub struct Cpu {
 	pc: u16,
-	//sp: u8,
+	sp: u8,
 
-	//p: u8,
 	a: u8,
 	x: u8,
 	y: u8,
 
 	n: u8,
 	v: u8,
-	//b: u8,
-	//d: u8,
-	//i: u8,
+	b: u8,
+	d: u8,
+	i: u8,
 	z: u8,
 	c: u8,
 }
@@ -85,19 +84,18 @@ enum Instruction {
 impl Cpu {
 	pub fn new() -> Cpu {
 		Cpu {
-			pc: 0,
-			//sp: 255,
+			pc: 0xFFFC,
+			sp: 0xFF,
 
-			//p: 0,
 			a: 0,
 			x: 0,
 			y: 0,
 
 			n: 0,
 			v: 0,
-			//b: 0,
-			//d: 0,
-			//i: 0,
+			b: 0,
+			d: 0,
+			i: 0,
 			z: 0,
 			c: 0
 		}
@@ -109,6 +107,32 @@ impl Cpu {
 		let instr = self.decode(memory, opcode);
 
 		self.execute(memory, instr);
+	}
+
+	fn stack_push(&mut self, memory: &mut Memory, value: u8) {
+		memory.write(0x0100 + u16::from(self.sp), value);
+
+		self.sp -= 1;
+	}
+
+	fn stack_pop(&mut self, memory: &Memory) -> u8 {
+		self.sp += 1;
+		
+		memory.read(0x0100 + u16::from(self.sp))
+	}
+
+	fn set_status(&mut self, p: u8) {
+		self.n = p >> 7;
+		self.v = (p & 0x40) >> 6;
+		self.b = (p & 0x10) >> 4;
+		self.d = (p & 0x08) >> 3;
+		self.i = (p & 0x04) >> 2;
+		self.z = (p & 0x02) >> 1;
+		self.c = p & 0x01;
+	}
+
+	fn get_status(&mut self) -> u8 {
+		(self.n << 7) + (self.v << 6) + (self.b << 4) + (self.d << 3) + (self.i << 2) + (self.z << 1) + self.c
 	}
 
 	fn fetch(&mut self, memory: &Memory) -> u8 {
@@ -393,9 +417,7 @@ impl Cpu {
 			Instruction::Beq(offset) => {
 				self.pc = self.apply_beq_op(self.pc, offset);
 			},
-			Instruction::Bit(value) => {
-				self.apply_bit_op(value);
-			},
+			Instruction::Bit(value) => self.apply_bit_op(value),
 			Instruction::Bmi(offset) => {
 				self.pc = self.apply_bmi_op(self.pc, offset);
 			},
@@ -405,66 +427,148 @@ impl Cpu {
 			Instruction::Bpl(offset) => {
 				self.pc = self.apply_bpl_op(self.pc, offset);
 			},
-			Instruction::Brk => todo!("TODO: Brk"),
-			Instruction::Bvc(_) => todo!("TODO: Bvc"),
-			Instruction::Bvs(_) => todo!("TODO: Bvs"),
-			Instruction::Clc => todo!("TODO: Clc"),
-			Instruction::Cld => todo!("TODO: Cld"),
-			Instruction::Cli => todo!("TODO: Cli"),
-			Instruction::Clv => todo!("TODO: Clv"),
-			Instruction::Cmp(_) => todo!("TODO: Cmp"),
-			Instruction::Cpx(_) => todo!("TODO: Cpx"),
-			Instruction::Cpy(_) => todo!("TODO: Cpy"),
-			Instruction::Dec(_) => todo!("TODO: Dec"),
-			Instruction::Dex => todo!("TODO: Dex"),
-			Instruction::Dey => todo!("TODO: Dey"),
-			Instruction::Eor(_) => todo!("TODO: Eor"),
-			Instruction::Inc(_) => todo!("TODO: Inc"),
-			Instruction::Inx => todo!("TODO: Inx"),
-			Instruction::Iny => todo!("TODO: Iny"),
-			Instruction::Jmp(_) => todo!("TODO: Jmp"),
-			Instruction::Jsr(_) => todo!("TODO: Jsr"),
-			Instruction::Lda(_) => todo!("TODO: Lda"),
-			Instruction::Ldx(_) => todo!("TODO: Ldx"),
-			Instruction::Ldy(_) => todo!("TODO: Ldy"),
-			Instruction::LsrA => todo!("Todo: LsrA"),
-			Instruction::Lsr(_) => todo!("TODO: Lsr"),
-			Instruction::Ora(_) => todo!("TODO: Ora"),
-			Instruction::Pha => todo!("TODO: Pha"),
-			Instruction::Php => todo!("TODO: Php"),
-			Instruction::Pla => todo!("TODO: Pla"),
-			Instruction::Plp => todo!("TODO: Plp"),
-			Instruction::RolA => todo!("TODO: RolA"),
-			Instruction::Rol(_) => todo!("TODO: Rol"),
-			Instruction::RorA => todo!("TODO: Ror"),
-			Instruction::Ror(_) => todo!("TODO: Ror"),
-			Instruction::Rti => todo!("TODO: Rti"),
-			Instruction::Rts => todo!("TODO: Rts"),
-			Instruction::Sbc(_) => todo!("TODO: Sbc"),
-			Instruction::Sec => todo!("TODO: Sec"),
-			Instruction::Sed => todo!("TODO: Sed"),
-			Instruction::Sei => todo!("TODO: Sei"),
-			Instruction::Sta(_) => todo!("TODO: Sta"),
-			Instruction::Stx(_) => todo!("TODO: Stx"),
-			Instruction::Sty(_) => todo!("TODO: Sty"),
-			Instruction::Tax => todo!("TODO: Tax"),
-			Instruction::Tay => todo!("TODO: Tay"),
-			Instruction::Tsx => todo!("TODO: Tsx"),
-			Instruction::Txa => todo!("TODO: Txa"),
-			Instruction::Txs => todo!("TODO: Txs"),
-			Instruction::Tya => todo!("TODO: Tya"),
+			Instruction::Brk => self.apply_brk_op(memory),
+			Instruction::Bvc(offset) => {
+				self.pc = self.apply_bvc_op(self.pc, offset)
+			},
+			Instruction::Bvs(offset) => {
+				self.pc = self.apply_bvs_op(self.pc, offset);
+			},
+			Instruction::Clc => self.c = 0,
+			Instruction::Cld => self.d = 0,
+			Instruction::Cli => self.i = 0,
+			Instruction::Clv => self.v = 0,
+			Instruction::Cmp(value) => self.apply_cmp_op(self.a, value),
+			Instruction::Cpx(value) => self.apply_cmp_op(self.x, value),
+			Instruction::Cpy(value) => self.apply_cmp_op(self.y, value),
+			Instruction::Dec(adress) => {
+				let value = memory.read(adress);
+
+				memory.write(adress, self.apply_dec_op(value));
+			},
+			Instruction::Dex => self.x = self.apply_dec_op(self.x),
+			Instruction::Dey => self.x = self.apply_dec_op(self.y),
+			Instruction::Eor(value) => {
+				self.a = self.apply_eor_op(value);
+			},
+			Instruction::Inc(adress) => {
+				let value = memory.read(adress);
+
+				memory.write(adress, self.apply_inc_op(value));
+			},
+			Instruction::Inx => {
+				self.x = self.apply_inc_op(self.x);
+			},
+			Instruction::Iny => {
+				self.y = self.apply_inc_op(self.y);
+			},
+			Instruction::Jmp(adress) => self.pc = adress,
+			Instruction::Jsr(adress) => {
+				self.apply_jsr_op(memory);
+
+				self.pc = adress;
+			},
+			Instruction::Lda(value) => {
+				self.a = self.apply_ld_op(value);
+			},
+			Instruction::Ldx(value) => {
+				self.x = self.apply_ld_op(value);
+			},
+			Instruction::Ldy(value) => {
+				self.y = self.apply_ld_op(value);
+			},
+			Instruction::LsrA => {
+				self.a = self.apply_lsr_op(self.a);
+			},
+			Instruction::Lsr(adress) => {
+				let value = memory.read(adress);
+
+				memory.write(adress, self.apply_lsr_op(value));
+			},
+			Instruction::Ora(value) => {
+				self.a = self.apply_ora_op(value);
+			},
+			Instruction::Pha => self.apply_pha_op(memory),
+			Instruction::Php => self.apply_php_op(memory),
+			Instruction::Pla => self.apply_pla_op(memory),
+			Instruction::Plp => self.apply_plp_op(memory),
+			Instruction::RolA => {
+				self.a = self.apply_rol_op(self.a);
+			}
+			Instruction::Rol(adress) => {
+				let value = memory.read(adress);
+
+				memory.write(adress, self.apply_rol_op(value));
+			},
+			Instruction::RorA => {
+				self.a = self.apply_ror_op(self.a);
+			},
+			Instruction::Ror(adress) => {
+				let value = memory.read(adress);
+
+				memory.write(adress, self.apply_ror_op(value));
+			},
+			Instruction::Rti => self.apply_rti_op(memory),
+			Instruction::Rts => {
+				self.pc = self.apply_rts_op(memory);
+			},
+			Instruction::Sbc(value) => {
+				self.a = self.apply_sbc_op(value);
+			},
+			Instruction::Sec => self.c = 1,
+			Instruction::Sed => self.d = 1,
+			Instruction::Sei => self.i = 1,
+			Instruction::Sta(adress) => {
+				memory.write(adress, self.a);
+			},
+			Instruction::Stx(adress) => {
+				memory.write(adress, self.x)
+			},
+			Instruction::Sty(adress) => {
+				memory.write(adress, self.y);
+			},
+			Instruction::Tax => {
+				self.x = self.a;
+				self.z = u8::from(self.x == 0);
+				self.n = self.x >> 7;
+			},
+			Instruction::Tay => {
+				self.y = self.a;
+				self.z = u8::from(self.y == 0);
+				self.n = self.y >> 7;
+			},
+			Instruction::Tsx => {
+				self.x = self.sp;
+				self.z = u8::from(self.x == 0);
+				self.n = self.x >> 7;
+			},
+			Instruction::Txa => {
+				self.a = self.x;
+				self.z = u8::from(self.a == 0);
+				self.n = self.a >> 7;
+			},
+			Instruction::Txs => {
+				self.sp = self.x;
+				self.z = u8::from(self.x == 0);
+				self.n = self.x >> 7;
+			},
+			Instruction::Tya => {
+				self.a = self.y;
+				self.z = u8::from(self.y == 0);
+				self.n = self.y >> 7;
+			},
 
 			Instruction::Nop => {}
 		}
 	}
 
 	fn apply_adc_op(&mut self, value: u8) -> u8 {
-		let (temp, overflowed_1) = u8::overflowing_add(value, value);
+		let (temp, overflowed_1) = u8::overflowing_add(self.a, value);
 		let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
 		
 		self.c = u8::from(overflowed_1 || overflowed_2);
 		self.v = u8::from((value & 0x80) != (result & 0x80));
-		self.n = u8::from(result & 0x80 == 0x80);
+		self.n = result >> 7;
 		self.z = u8::from(result == 0);
 		
 		result
@@ -484,7 +588,7 @@ impl Cpu {
 
 		let result = (value & 0x7F) << 1;
 
-		self.n = (result & 0x80) >> 7;
+		self.n = result >> 7;
 		self.z = u8::from(result == 0);
 
 		result
@@ -515,7 +619,7 @@ impl Cpu {
 	}
 
 	fn apply_bit_op(&mut self, value: u8) {
-		self.n = (value & 0x80) >> 7;
+		self.n = value >> 7;
 		self.v = (value & 0x40) >> 6;
 
 		self.z = u8::from((self.a & value) == 0);
@@ -543,5 +647,276 @@ impl Cpu {
 		}
 		
 		pc
+	}
+
+	fn apply_brk_op(&mut self, memory: &mut Memory) {
+		self.apply_jsr_op(memory);
+		let p = self.get_status();
+		self.stack_push(memory, p);
+
+		self.pc = 0xFFFE;
+	}
+
+	fn apply_bvc_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.v == 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_bvs_op(&mut self, pc: u16, offset: i8) -> u16 {
+		if self.v != 0 {
+			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+		}
+		
+		pc
+	}
+
+	fn apply_cmp_op(&mut self, register: u8, value: u8) {
+		let (result, underflow) = register.overflowing_sub(value);
+		self.z = u8::from(result == 0);
+		self.n = result >> 7;
+		self.c = u8::from(!underflow);
+	}
+
+	fn apply_dec_op(&mut self, value: u8) -> u8 {
+		let (result, _) = value.overflowing_sub(1);
+
+		self.z = u8::from(result == 0);
+		self.n = result >> 7;
+
+		result
+	}
+
+	fn apply_eor_op(&mut self, value: u8) -> u8 {
+		let result = self.a ^ value;
+
+		self.z = u8::from(result == 0);
+		self.n = result >> 7;
+
+		result
+	}
+
+	fn apply_inc_op(&mut self, value: u8) -> u8 {
+		let (result, _) = value.overflowing_add(1);
+
+		self.z = u8::from(result == 0);
+		self.n = result >> 7;
+
+		result
+	}
+
+	fn apply_jsr_op(&mut self, memory: &mut Memory) {
+		let low_pc = u8::try_from(self.pc & 0x00FF).unwrap();
+		let high_pc = u8::try_from((self.pc & 0xFF00) >> 8).unwrap();
+
+		self.stack_push(memory, high_pc);
+		self.stack_push(memory, low_pc);
+	}
+
+	fn apply_ld_op(&mut self, value: u8) -> u8 {
+		self.z = u8::from(value == 0);
+		self.n = value >> 7;
+
+		value
+	}
+
+	fn apply_lsr_op(&mut self, value: u8) -> u8 {
+		self.c = value & 0x01;
+		self.n = 0;
+
+		let result = value >> 1;
+		self.z = u8::from(result == 0);
+
+		result
+	}
+
+	fn apply_ora_op(&mut self, value: u8) -> u8 {
+		let result = value | self.a;
+
+		self.z = u8::from(result == 0);
+		self.n = result >> 7;
+
+		result
+	}
+
+	fn apply_pha_op(&mut self, memory: &mut Memory) {
+		self.stack_push(memory, self.a);
+	}
+
+	fn apply_php_op(&mut self, memory: &mut Memory) {
+		let p = self.get_status();
+		
+		self.stack_push(memory, p);
+	}
+
+	fn apply_pla_op(&mut self, memory: &Memory) {
+		self.a = self.stack_pop(memory);
+	}
+
+	fn apply_plp_op(&mut self, memory: &Memory) {
+		let p = self.stack_pop(memory);
+
+		self.set_status(p);
+	}
+
+	fn apply_rol_op(&mut self, value: u8) -> u8 {
+		let result = (value << 1) + self.c;
+		self.c = value >> 7;
+		self.n = (value & 0x40) >> 6;
+		self.z = u8::from(result == 0);
+
+		result
+	}
+
+	fn apply_ror_op(&mut self, value: u8) -> u8 {
+		let result = (self.c << 7) + (value >> 1);
+		self.n = self.c;
+		self.c = value & 0x01;
+		self.z = u8::from(result == 0);
+
+		result
+	}
+
+	fn apply_rti_op(&mut self, memory: &Memory) {
+		let p = self.stack_pop(memory);
+		self.pc = self.apply_rts_op(memory);
+
+		self.set_status(p);
+	}
+
+	fn apply_rts_op(&mut self, memory: &Memory) -> u16 {
+		let low_pc = u16::from(self.stack_pop(memory));
+		let high_pc = u16::from(self.stack_pop(memory));
+
+		(high_pc << 8) + low_pc
+	}
+
+	fn apply_sbc_op(&mut self, value: u8) -> u8 {
+		let (temp, overflowed_1) = u8::overflowing_sub(self.a, value);
+		let (result, overflowed_2) = u8::overflowing_add(temp, 1 - self.c);
+		
+		self.c = !result >> 7; // Greater or equal to 0
+		self.v = u8::from(overflowed_1 || overflowed_2);
+		self.n = result >> 7;
+		self.z = u8::from(result == 0);
+		
+		result
+	}
+}
+
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn adc_op() {
+		// TODO: need more testing on flags
+		let mut cpu = Cpu::new();
+		
+		cpu.a = 0x01;
+		assert_eq!(cpu.apply_adc_op(0xFE), 0xFF);
+		assert_eq!(cpu.c, 0);
+	
+		cpu.a = 0x03;
+		assert_eq!(cpu.apply_adc_op(0xFE), 0x01);
+		assert_eq!(cpu.c, 1);
+	}
+
+	#[test]
+	fn cmp_op() {
+		let mut cpu = Cpu::new();
+		cpu.a = 0x10; // Set accumulator
+
+		cpu.apply_cmp_op(cpu.a, 0x10);
+		assert_eq!(cpu.z, 1);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.n, 0);
+
+		cpu.apply_cmp_op(cpu.a, 0x09);
+		assert_eq!(cpu.z, 0);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.n, 0);
+
+		cpu.apply_cmp_op(cpu.a, 0x11);
+		assert_eq!(cpu.z, 0);
+		assert_eq!(cpu.c, 0);
+		assert_eq!(cpu.n, 1);
+
+		assert_eq!(cpu.a, 0x10);
+	}
+
+	#[test]
+	fn lsr_op() {
+		let mut cpu = Cpu::new();
+		cpu.n = 1;
+
+		assert_eq!(cpu.apply_lsr_op(0x01), 0x00);
+		assert_eq!(cpu.n, 0);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.z, 1);
+
+		assert_eq!(cpu.apply_lsr_op(0x02), 0x01);
+		assert_eq!(cpu.c, 0);
+		assert_eq!(cpu.z, 0);
+	}
+
+	#[test]
+	fn rol_op() {
+		let mut cpu = Cpu::new();
+
+		cpu.c = 1;
+		assert_eq!(cpu.apply_rol_op(0b1001_0000), 0b0010_0001);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.n, 0);
+		assert_eq!(cpu.z, 0);
+
+		cpu.c = 0;
+		assert_eq!(cpu.apply_rol_op(0b0101_0100), 0b1010_1000);
+		assert_eq!(cpu.c, 0);
+		assert_eq!(cpu.n, 1);
+		assert_eq!(cpu.z, 0);
+
+		cpu.c = 0;
+		assert_eq!(cpu.apply_rol_op(0b1000_0000), 0x00);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.n, 0);
+		assert_eq!(cpu.z, 1);
+	}
+
+	#[test]
+	fn ror_op() {
+		let mut cpu = Cpu::new();
+
+		cpu.c = 1;
+		assert_eq!(cpu.apply_ror_op(0b1001_0000), 0b1100_1000);
+		assert_eq!(cpu.c, 0);
+		assert_eq!(cpu.n, 1);
+		assert_eq!(cpu.z, 0);
+
+		cpu.c = 0;
+		assert_eq!(cpu.apply_ror_op(0b0101_0101), 0b0010_1010);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.n, 0);
+		assert_eq!(cpu.z, 0);
+
+		cpu.c = 0;
+		assert_eq!(cpu.apply_ror_op(0b0000_0001), 0x00);
+		assert_eq!(cpu.c, 1);
+		assert_eq!(cpu.n, 0);
+		assert_eq!(cpu.z, 1);
+	}
+
+	#[test]
+	fn sbc_op() {
+		// TODO: need more testing on flags
+		let mut cpu = Cpu::new();
+
+		cpu.c = 1;
+		cpu.a = 0xFE;
+		assert_eq!(cpu.apply_sbc_op(0x01), 0xFD);
+		assert_eq!(cpu.v, 0);
 	}
 }
