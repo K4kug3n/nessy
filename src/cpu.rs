@@ -15,6 +15,8 @@ pub struct Cpu {
 	i: u8,
 	z: u8,
 	c: u8,
+
+	extra_cycle: u8
 }
 
 enum Instruction {
@@ -97,16 +99,21 @@ impl Cpu {
 			d: 0,
 			i: 0,
 			z: 0,
-			c: 0
+			c: 0,
+
+			extra_cycle: 0,
 		}
 	}
 
-	pub fn step(&mut self, memory: &mut Memory) {
+	pub fn step(&mut self, memory: &mut Memory) -> u8 {
 		let opcode = self.fetch(memory);
 
-		let instr = self.decode(memory, opcode);
+		let (instr, cycle) = self.decode(memory, opcode);
 
+		self.extra_cycle = 0;
 		self.execute(memory, instr);
+
+		cycle + self.extra_cycle
 	}
 
 	fn stack_push(&mut self, memory: &mut Memory, value: u8) {
@@ -135,6 +142,10 @@ impl Cpu {
 		(self.n << 7) + (self.v << 6) + (self.b << 4) + (self.d << 3) + (self.i << 2) + (self.z << 1) + self.c
 	}
 
+	fn cross(origin: u16, next: u16) -> bool {
+		(origin & 0xFF00) != (next & 0xFF00)
+	}
+
 	fn fetch(&mut self, memory: &Memory) -> u8 {
 		let value = memory.read(self.pc);
 		self.pc += 1;
@@ -161,11 +172,21 @@ impl Cpu {
 	}
 
 	fn fetch_x_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
-		self.fetch_absolute_adress(memory) + u16::from(self.x)
+		let absolute = self.fetch_absolute_adress(memory);
+		let adress = absolute + u16::from(self.x);
+
+		self.extra_cycle = u8::from(Cpu::cross(absolute, adress));
+
+		adress
 	}
 
 	fn fetch_y_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
-		self.fetch_absolute_adress(memory) + u16::from(self.y)
+		let absolute = self.fetch_absolute_adress(memory) + u16::from(self.y);
+		let adress = absolute + u16::from(self.y);
+
+		self.extra_cycle = u8::from(Cpu::cross(absolute, adress));
+
+		adress
 	}
 
 	fn fetch_zero_page_adress(&mut self, memory: &Memory) -> u16 {
@@ -190,201 +211,204 @@ impl Cpu {
 	}
 
 	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, memory: &Memory) -> u16 {
-		let indirect = self.fetch_zero_page_adress(memory);
+		let pointer = self.fetch_zero_page_adress(memory);
 
 		// Little endian
-		let adress = u16::from(memory.read(indirect)) + (u16::from(memory.read(indirect+1)) << 8);
+		let indirect = u16::from(memory.read(pointer)) + (u16::from(memory.read(pointer+1)) << 8);
+		let adress = indirect + u16::from(self.y);
 
-		adress + u16::from(self.y)
+		self.extra_cycle = u8::from(Cpu::cross(indirect, adress)); // Cross
+
+		adress
 	}
 
-	fn decode(&mut self, memory: &Memory, opcode: u8) -> Instruction {
+	fn decode(&mut self, memory: &Memory, opcode: u8) -> (Instruction, u8) {
 		match opcode {
-			0x69 => Instruction::Adc(self.fetch(memory)),
-			0x6D => Instruction::Adc(memory.read(self.fetch_absolute_adress(memory))),
-			0x7D => Instruction::Adc(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0x79 => Instruction::Adc(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0x65 => Instruction::Adc(memory.read(self.fetch_zero_page_adress(memory))),
-			0x75 => Instruction::Adc(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0x61 => Instruction::Adc(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
-			0x71 => Instruction::Adc(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
+			0x69 => (Instruction::Adc(self.fetch(memory)), 2),
+			0x6D => (Instruction::Adc(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0x7D => (Instruction::Adc(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x79 => (Instruction::Adc(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x65 => (Instruction::Adc(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0x75 => (Instruction::Adc(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0x61 => (Instruction::Adc(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))), 6),
+			0x71 => (Instruction::Adc(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
 			
-			0x29 => Instruction::And(self.fetch(memory)),
-			0x2D => Instruction::And(memory.read(self.fetch_absolute_adress(memory))),
-			0x3D => Instruction::And(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0x39 => Instruction::And(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0x25 => Instruction::And(memory.read(self.fetch_zero_page_adress(memory))),
-			0x35 => Instruction::And(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0x21 => Instruction::And(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
-			0x31 => Instruction::And(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
+			0x29 => (Instruction::And(self.fetch(memory)), 2),
+			0x2D => (Instruction::And(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0x3D => (Instruction::And(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x39 => (Instruction::And(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x25 => (Instruction::And(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0x35 => (Instruction::And(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0x21 => (Instruction::And(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))), 6),
+			0x31 => (Instruction::And(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
 
-			0x0A => Instruction::AslA,
-			0x0E => Instruction::Asl(self.fetch_absolute_adress(memory)),
-			0x1E => Instruction::Asl(self.fetch_x_indexed_absolute_adress(memory)),
-			0x06 => Instruction::Asl(self.fetch_zero_page_adress(memory)),
-			0x16 => Instruction::Asl(self.fetch_x_indexed_zero_page_adress(memory)),
+			0x0A => (Instruction::AslA, 2),
+			0x0E => (Instruction::Asl(self.fetch_absolute_adress(memory)), 6),
+			0x1E => (Instruction::Asl(self.fetch_x_indexed_absolute_adress(memory)), 7),
+			0x06 => (Instruction::Asl(self.fetch_zero_page_adress(memory)), 5),
+			0x16 => (Instruction::Asl(self.fetch_x_indexed_zero_page_adress(memory)), 6),
+
+			0x90 => (Instruction::Bcc(self.fetch_relative(memory)), 2 /* + p + t */),
+			0xB0 => (Instruction::Bcs(self.fetch_relative(memory)), 2 /* + p + t */),
+			0xF0 => (Instruction::Beq(self.fetch_relative(memory)), 2 /* + p + t */),
+
+			0x24 => (Instruction::Bit(memory.read(self.fetch_zero_page_adress(memory))), 4),
+			0x2C => (Instruction::Bit(memory.read(self.fetch_absolute_adress(memory))), 3),
+
+			0x30 => (Instruction::Bmi(self.fetch_relative(memory)), 2 /* + p + t */),
+			0xD0 => (Instruction::Bne(self.fetch_relative(memory)), 2 /* + p + t */),
+			0x10 => (Instruction::Bpl(self.fetch_relative(memory)), 2 /* + p + t */),
+
+			0x00 => (Instruction::Brk, 7),
+
+			0x50 => (Instruction::Bvc(self.fetch_relative(memory)), 2 /* + p + t */),
+			0x70 => (Instruction::Bvs(self.fetch_relative(memory)), 2 /* + p + t */),
+
+			0x18 => (Instruction::Clc, 2),
+			0xD8 => (Instruction::Cld, 2),
+			0x58 => (Instruction::Cli, 2),
+			0xB8 => (Instruction::Clv, 2),
+
+			0xC9 => (Instruction::Cmp(self.fetch(memory)), 2),
+			0xCD => (Instruction::Cmp(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xDD => (Instruction::Cmp(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xD9 => (Instruction::Cmp(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xC5 => (Instruction::Cmp(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0xD5 => (Instruction::Cmp(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0xC1 => (Instruction::Cmp(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))), 6),
+			0xD1 => (Instruction::Cmp(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
+
+			0xE0 => (Instruction::Cpx(self.fetch(memory)), 2),
+			0xEC => (Instruction::Cpx(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xE4 => (Instruction::Cpx(memory.read(self.fetch_zero_page_adress(memory))), 3),
+
+			0xC0 => (Instruction::Cpy(self.fetch(memory)), 2),
+			0xCC => (Instruction::Cpy(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xC4 => (Instruction::Cpy(memory.read(self.fetch_zero_page_adress(memory))), 3),
+
+			0xCE => (Instruction::Dec(self.fetch_absolute_adress(memory)), 6),
+			0xDE => (Instruction::Dec(self.fetch_x_indexed_absolute_adress(memory)), 7),
+			0xC6 => (Instruction::Dec(self.fetch_zero_page_adress(memory)), 5),
+			0xD6 => (Instruction::Dec(self.fetch_x_indexed_zero_page_adress(memory)), 6),
+
+			0xCA => (Instruction::Dex, 2),
+			0x88 => (Instruction::Dey, 2),
+
+			0x49 => (Instruction::Eor(self.fetch(memory)), 2),
+			0x4D => (Instruction::Eor(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0x5D => (Instruction::Eor(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x59 => (Instruction::Eor(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x45 => (Instruction::Eor(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0x55 => (Instruction::Eor(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0x41 => (Instruction::Eor(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))), 6),
+			0x51 => (Instruction::Eor(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
+
+			0xEE => (Instruction::Inc(self.fetch_absolute_adress(memory)), 6),
+			0xFE => (Instruction::Inc(self.fetch_x_indexed_absolute_adress(memory)), 7),
+			0xE6 => (Instruction::Inc(self.fetch_zero_page_adress(memory)), 5),
+			0xF6 => (Instruction::Inc(self.fetch_x_indexed_zero_page_adress(memory)), 6),
+
+			0xE8 => (Instruction::Inx, 2),
+			0xC8 => (Instruction::Iny, 2),
+
+			0x4C => (Instruction::Jmp(self.fetch_absolute_adress(memory)), 3),
+			0x6C => (Instruction::Jmp(self.fetch_absolute_indirect_adress(memory)), 5),
+
+			0x20 => (Instruction::Jsr(self.fetch_absolute_adress(memory)), 6),
+
+			0xA9 => (Instruction::Lda(self.fetch(memory)), 2),
+			0xAD => (Instruction::Lda(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xBD => (Instruction::Lda(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xB9 => (Instruction::Lda(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xA5 => (Instruction::Lda(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0xB5 => (Instruction::Lda(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0xA1 => (Instruction::Lda(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))), 6),
+			0xB1 => (Instruction::Lda(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
+
+			0xA2 => (Instruction::Ldx(self.fetch(memory)), 2),
+			0xAE => (Instruction::Ldx(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xBE => (Instruction::Ldx(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xA6 => (Instruction::Ldx(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0xB6 => (Instruction::Ldx(memory.read(self.fetch_y_indexed_zero_page_adress(memory))), 4),
+
+			0xA0 => (Instruction::Ldy(self.fetch(memory)), 2),
+			0xAC => (Instruction::Ldy(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xBC => (Instruction::Ldy(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xA4 => (Instruction::Ldy(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0xB4 => (Instruction::Ldy(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+
+			0x4A => (Instruction::LsrA, 2),
+			0x4E => (Instruction::Lsr(self.fetch_absolute_adress(memory)), 6),
+			0x5E => (Instruction::Lsr(self.fetch_x_indexed_absolute_adress(memory)), 7),
+			0x46 => (Instruction::Lsr(self.fetch_zero_page_adress(memory)), 5),
+			0x56 => (Instruction::Lsr(self.fetch_x_indexed_zero_page_adress(memory)), 6),
+
+			0xEA => (Instruction::Nop, 2),
+
+			0x09 => (Instruction::Ora(self.fetch(memory)), 2),
+			0x0D => (Instruction::Ora(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0x1D => (Instruction::Ora(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x19 => (Instruction::Ora(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0x05 => (Instruction::Ora(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0x15 => (Instruction::Ora(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0x01 => (Instruction::Ora(memory.read(self.fetch_y_indexed_zero_page_adress(memory))), 6),
+			0x11 => (Instruction::Ora(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
+
+			0x48 => (Instruction::Pha, 3),
+			0x08 => (Instruction::Php, 3),
+			0x68 => (Instruction::Pla, 4),
+			0x28 => (Instruction::Plp, 4),
+
+			0x2A => (Instruction::RolA, 2),
+			0x2E => (Instruction::Rol(self.fetch_absolute_adress(memory)), 6),
+			0x3E => (Instruction::Rol(self.fetch_x_indexed_absolute_adress(memory)), 7),
+			0x26 => (Instruction::Rol(self.fetch_zero_page_adress(memory)), 5),
+			0x36 => (Instruction::Rol(self.fetch_x_indexed_zero_page_adress(memory)), 6),
 			
-			0x90 => Instruction::Bcc(self.fetch_relative(memory)),
-			0xB0 => Instruction::Bcs(self.fetch_relative(memory)),
-			0xF0 => Instruction::Beq(self.fetch_relative(memory)),
+			0x6A => (Instruction::RorA, 2),
+			0x6E => (Instruction::Ror(self.fetch_absolute_adress(memory)), 6),
+			0x7E => (Instruction::Ror(self.fetch_x_indexed_absolute_adress(memory)), 7),
+			0x66 => (Instruction::Ror(self.fetch_zero_page_adress(memory)), 5),
+			0x76 => (Instruction::Ror(self.fetch_x_indexed_zero_page_adress(memory)), 6),
 
-			0x24 => Instruction::Bit(memory.read(self.fetch_zero_page_adress(memory))),
-			0x2C => Instruction::Bit(memory.read(self.fetch_absolute_adress(memory))),
+			0x40 => (Instruction::Rti, 6),
+			0x60 => (Instruction::Rts, 6),
 
-			0x30 => Instruction::Bmi(self.fetch_relative(memory)),
-			0xD0 => Instruction::Bne(self.fetch_relative(memory)),
-			0x10 => Instruction::Bpl(self.fetch_relative(memory)),
+			0xE9 => (Instruction::Sbc(self.fetch(memory)), 2),
+			0xED => (Instruction::Sbc(memory.read(self.fetch_absolute_adress(memory))), 4),
+			0xFD => (Instruction::Sbc(memory.read(self.fetch_x_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xF9 => (Instruction::Sbc(memory.read(self.fetch_y_indexed_absolute_adress(memory))), 4 + self.extra_cycle),
+			0xE5 => (Instruction::Sbc(memory.read(self.fetch_zero_page_adress(memory))), 3),
+			0xF5 => (Instruction::Sbc(memory.read(self.fetch_x_indexed_zero_page_adress(memory))), 4),
+			0xE1 => (Instruction::Sbc(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))), 6),
+			0xF1 => (Instruction::Sbc(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))), 5 + self.extra_cycle),
 
-			0x00 => Instruction::Brk,
+			0x38 => (Instruction::Sec, 2),
+			0xF8 => (Instruction::Sed, 2),
+			0x78 => (Instruction::Sei, 2),
 
-			0x50 => Instruction::Bvc(self.fetch_relative(memory)),
-			0x70 => Instruction::Bvs(self.fetch_relative(memory)),
+			0x8D => (Instruction::Sta(self.fetch_absolute_adress(memory)), 4),
+			0x9D => (Instruction::Sta(self.fetch_x_indexed_absolute_adress(memory)), 5),
+			0x99 => (Instruction::Sta(self.fetch_y_indexed_absolute_adress(memory)), 5),
+			0x85 => (Instruction::Sta(self.fetch_zero_page_adress(memory)), 3),
+			0x95 => (Instruction::Sta(self.fetch_x_indexed_zero_page_adress(memory)), 4),
+			0x81 => (Instruction::Sta(self.fetch_x_indexed_zero_page_indirect_adress(memory)), 6),
+			0x91 => (Instruction::Sta(self.fetch_zero_page_indirect_y_indexed_adress(memory)), 6),
 
-			0x18 => Instruction::Clc,
-			0xD8 => Instruction::Cld,
-			0x58 => Instruction::Cli,
-			0xB8 => Instruction::Clv,
+			0x8E => (Instruction::Stx(self.fetch_absolute_adress(memory)), 4),
+			0x86 => (Instruction::Stx(self.fetch_zero_page_adress(memory)), 3),
+			0x96 => (Instruction::Stx(self.fetch_y_indexed_zero_page_adress(memory)), 4),
 
-			0xC9 => Instruction::Cmp(self.fetch(memory)),
-			0xCD => Instruction::Cmp(memory.read(self.fetch_absolute_adress(memory))),
-			0xDD => Instruction::Cmp(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0xD9 => Instruction::Cmp(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0xC5 => Instruction::Cmp(memory.read(self.fetch_zero_page_adress(memory))),
-			0xD5 => Instruction::Cmp(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0xC1 => Instruction::Cmp(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
-			0xD1 => Instruction::Cmp(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
+			0x8C => (Instruction::Sty(self.fetch_absolute_adress(memory)), 4),
+			0x84 => (Instruction::Sty(self.fetch_zero_page_adress(memory)), 3),
+			0x94 => (Instruction::Sty(self.fetch_x_indexed_zero_page_adress(memory)), 4),
 
-			0xE0 => Instruction::Cpx(self.fetch(memory)),
-			0xEC => Instruction::Cpx(memory.read(self.fetch_absolute_adress(memory))),
-			0xE4 => Instruction::Cpx(memory.read(self.fetch_zero_page_adress(memory))),
-
-			0xC0 => Instruction::Cpy(self.fetch(memory)),
-			0xCC => Instruction::Cpy(memory.read(self.fetch_absolute_adress(memory))),
-			0xC4 => Instruction::Cpy(memory.read(self.fetch_zero_page_adress(memory))),
-
-			0xCE => Instruction::Dec(self.fetch_absolute_adress(memory)),
-			0xDE => Instruction::Dec(self.fetch_x_indexed_absolute_adress(memory)),
-			0xC6 => Instruction::Dec(self.fetch_zero_page_adress(memory)),
-			0xD6 => Instruction::Dec(self.fetch_x_indexed_zero_page_adress(memory)),
-
-			0xCA => Instruction::Dex,
-			0x88 => Instruction::Dey,
-
-			0x49 => Instruction::Eor(self.fetch(memory)),
-			0x4D => Instruction::Eor(memory.read(self.fetch_absolute_adress(memory))),
-			0x5D => Instruction::Eor(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0x59 => Instruction::Eor(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0x45 => Instruction::Eor(memory.read(self.fetch_zero_page_adress(memory))),
-			0x55 => Instruction::Eor(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0x41 => Instruction::Eor(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
-			0x51 => Instruction::Eor(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
-
-			0xEE => Instruction::Inc(self.fetch_absolute_adress(memory)),
-			0xFE => Instruction::Inc(self.fetch_x_indexed_absolute_adress(memory)),
-			0xE6 => Instruction::Inc(self.fetch_zero_page_adress(memory)),
-			0xF6 => Instruction::Inc(self.fetch_x_indexed_zero_page_adress(memory)),
-
-			0xE8 => Instruction::Inx,
-			0xC8 => Instruction::Iny,
-
-			0x4C => Instruction::Jmp(self.fetch_absolute_adress(memory)),
-			0x6C => Instruction::Jmp(self.fetch_absolute_indirect_adress(memory)),
-
-			0x20 => Instruction::Jsr(self.fetch_absolute_adress(memory)),
-
-			0xA9 => Instruction::Lda(self.fetch(memory)),
-			0xAD => Instruction::Lda(memory.read(self.fetch_absolute_adress(memory))),
-			0xBD => Instruction::Lda(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0xB9 => Instruction::Lda(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0xA5 => Instruction::Lda(memory.read(self.fetch_zero_page_adress(memory))),
-			0xB5 => Instruction::Lda(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0xA1 => Instruction::Lda(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
-			0xB1 => Instruction::Lda(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
-
-			0xA2 => Instruction::Ldx(self.fetch(memory)),
-			0xAE => Instruction::Ldx(memory.read(self.fetch_absolute_adress(memory))),
-			0xBE => Instruction::Ldx(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0xA6 => Instruction::Ldx(memory.read(self.fetch_zero_page_adress(memory))),
-			0xB6 => Instruction::Ldx(memory.read(self.fetch_y_indexed_zero_page_adress(memory))),
-
-			0xA0 => Instruction::Ldy(self.fetch(memory)),
-			0xAC => Instruction::Ldy(memory.read(self.fetch_absolute_adress(memory))),
-			0xBC => Instruction::Ldy(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0xA4 => Instruction::Ldy(memory.read(self.fetch_zero_page_adress(memory))),
-			0xB4 => Instruction::Ldy(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-
-			0x4A => Instruction::LsrA,
-			0x4E => Instruction::Lsr(self.fetch_absolute_adress(memory)),
-			0x5E => Instruction::Lsr(self.fetch_x_indexed_absolute_adress(memory)),
-			0x46 => Instruction::Lsr(self.fetch_zero_page_adress(memory)),
-			0x56 => Instruction::Lsr(self.fetch_x_indexed_zero_page_adress(memory)),
-
-			0xEA => Instruction::Nop,
-
-			0x09 => Instruction::Ora(self.fetch(memory)),
-			0x0D => Instruction::Ora(memory.read(self.fetch_absolute_adress(memory))),
-			0x1D => Instruction::Ora(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0x19 => Instruction::Ora(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0x05 => Instruction::Ora(memory.read(self.fetch_zero_page_adress(memory))),
-			0x15 => Instruction::Ora(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0x01 => Instruction::Ora(memory.read(self.fetch_y_indexed_zero_page_adress(memory))),
-			0x11 => Instruction::Ora(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
-
-			0x48 => Instruction::Pha,
-			0x08 => Instruction::Php,
-			0x68 => Instruction::Pla,
-			0x28 => Instruction::Plp,
-
-			0x2A => Instruction::RolA,
-			0x2E => Instruction::Rol(self.fetch_absolute_adress(memory)),
-			0x3E => Instruction::Rol(self.fetch_x_indexed_absolute_adress(memory)),
-			0x26 => Instruction::Rol(self.fetch_zero_page_adress(memory)),
-			0x36 => Instruction::Rol(self.fetch_x_indexed_zero_page_adress(memory)),
-			
-			0x6A => Instruction::RorA,
-			0x6E => Instruction::Ror(self.fetch_absolute_adress(memory)),
-			0x7E => Instruction::Ror(self.fetch_x_indexed_absolute_adress(memory)),
-			0x66 => Instruction::Ror(self.fetch_zero_page_adress(memory)),
-			0x76 => Instruction::Ror(self.fetch_x_indexed_zero_page_adress(memory)),
-
-			0x40 => Instruction::Rti,
-			0x60 => Instruction::Rts,
-
-			0xE9 => Instruction::Sbc(self.fetch(memory)),
-			0xED => Instruction::Sbc(memory.read(self.fetch_absolute_adress(memory))),
-			0xFD => Instruction::Sbc(memory.read(self.fetch_x_indexed_absolute_adress(memory))),
-			0xF9 => Instruction::Sbc(memory.read(self.fetch_y_indexed_absolute_adress(memory))),
-			0xE5 => Instruction::Sbc(memory.read(self.fetch_zero_page_adress(memory))),
-			0xF5 => Instruction::Sbc(memory.read(self.fetch_x_indexed_zero_page_adress(memory))),
-			0xE1 => Instruction::Sbc(memory.read(self.fetch_x_indexed_zero_page_indirect_adress(memory))),
-			0xF1 => Instruction::Sbc(memory.read(self.fetch_zero_page_indirect_y_indexed_adress(memory))),
-
-			0x38 => Instruction::Sec,
-			0xF8 => Instruction::Sed,
-			0x78 => Instruction::Sei,
-
-			0x8D => Instruction::Sta(self.fetch_absolute_adress(memory)),
-			0x9D => Instruction::Sta(self.fetch_x_indexed_absolute_adress(memory)),
-			0x99 => Instruction::Sta(self.fetch_y_indexed_absolute_adress(memory)),
-			0x85 => Instruction::Sta(self.fetch_zero_page_adress(memory)),
-			0x95 => Instruction::Sta(self.fetch_x_indexed_zero_page_adress(memory)),
-			0x81 => Instruction::Sta(self.fetch_x_indexed_zero_page_indirect_adress(memory)),
-			0x91 => Instruction::Sta(self.fetch_zero_page_indirect_y_indexed_adress(memory)),
-
-			0x8E => Instruction::Stx(self.fetch_absolute_adress(memory)),
-			0x86 => Instruction::Stx(self.fetch_zero_page_adress(memory)),
-			0x96 => Instruction::Stx(self.fetch_y_indexed_zero_page_adress(memory)),
-
-			0x8C => Instruction::Sty(self.fetch_absolute_adress(memory)),
-			0x84 => Instruction::Sty(self.fetch_zero_page_adress(memory)),
-			0x94 => Instruction::Sty(self.fetch_x_indexed_zero_page_adress(memory)),
-
-			0xAA => Instruction::Tax,
-			0xA8 => Instruction::Tay,
-			0xBA => Instruction::Tsx,
-			0x8A => Instruction::Txa,
-			0x9A => Instruction::Txs,
-			0x98 => Instruction::Tya,
+			0xAA => (Instruction::Tax, 2),
+			0xA8 => (Instruction::Tay, 2),
+			0xBA => (Instruction::Tsx, 2),
+			0x8A => (Instruction::Txa, 2),
+			0x9A => (Instruction::Txs, 2),
+			0x98 => (Instruction::Tya, 2),
 
 			_ => {
 				panic!("Opcode '{}' not implemented", opcode)
@@ -562,6 +586,14 @@ impl Cpu {
 		}
 	}
 
+	fn apply_branch(&mut self, pc: u16, offset: i8) -> u16 {
+		let adress = u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+
+		self.extra_cycle = 1 + u8::from(Cpu::cross(pc, adress));
+
+		adress
+	}
+
 	fn apply_adc_op(&mut self, value: u8) -> u8 {
 		let (temp, overflowed_1) = u8::overflowing_add(self.a, value);
 		let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
@@ -596,7 +628,7 @@ impl Cpu {
 
 	fn apply_bcc_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.c == 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -604,7 +636,7 @@ impl Cpu {
 
 	fn apply_bcs_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.c != 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -612,7 +644,7 @@ impl Cpu {
 
 	fn apply_beq_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.z != 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -627,7 +659,7 @@ impl Cpu {
 
 	fn apply_bmi_op(&mut self, pc: u16, offset: i8) -> u16 {	
 		if self.n != 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -635,7 +667,7 @@ impl Cpu {
 
 	fn apply_bne_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.z == 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -643,7 +675,7 @@ impl Cpu {
 
 	fn apply_bpl_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.n == 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -659,7 +691,7 @@ impl Cpu {
 
 	fn apply_bvc_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.v == 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -667,7 +699,7 @@ impl Cpu {
 
 	fn apply_bvs_op(&mut self, pc: u16, offset: i8) -> u16 {
 		if self.v != 0 {
-			return u16::try_from(i32::from(pc) + i32::from(offset)).unwrap();
+			return self.apply_branch(pc, offset);
 		}
 		
 		pc
@@ -809,7 +841,42 @@ impl Cpu {
 
 #[cfg(test)]
 mod tests {
+	use crate::mapper::Mapper;
+
 	use super::*;
+
+	#[test]
+	fn cross() {
+		assert_eq!(Cpu::cross(0xABCD, 0xABCE), false);
+		assert_eq!(Cpu::cross(0x00FF, 0x0100), true);
+		assert_eq!(Cpu::cross(0xAB00, 0xFF00), true);
+	}
+
+	#[test]
+	fn absolute_adress_mode() {
+		let mut cpu = Cpu::new();
+		cpu.pc = 0x0000;
+
+		let mut memory = Memory::new(<dyn Mapper>::from_id(0x0, vec![], vec![]));
+		memory.write(0x0000, 0xCD);
+		memory.write(0x0001, 0xAB);
+
+		assert_eq!(cpu.fetch_absolute_adress(&memory), 0x0ABCD);
+	}
+
+	#[test]
+	fn x_indexed_absolute_adress_mode() {
+		let mut cpu = Cpu::new();
+		cpu.pc = 0x0000;
+		cpu.x = 0x01;
+
+		let mut memory = Memory::new(<dyn Mapper>::from_id(0x0, vec![], vec![]));
+		memory.write(0x0000, 0xFF);
+		memory.write(0x0001, 0x00);
+
+		assert_eq!(cpu.fetch_x_indexed_absolute_adress(&memory), 0x0100);
+		assert_eq!(cpu.extra_cycle, 1);
+	}
 
 	#[test]
 	fn adc_op() {
