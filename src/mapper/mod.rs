@@ -3,8 +3,11 @@ pub mod nrom;
 use nrom::Nrom;
 
 pub trait Mapper {
-	fn read(&self, adress: u16) -> u8;
-	fn write(&mut self, adress: u16, value: u8);
+	fn cpu_read(&self, adress: u16) -> u8;
+	fn cpu_write(&mut self, adress: u16, value: u8);
+
+	fn ppu_read(&self, adress: u16) -> u8;
+	fn ppu_write(&mut self, adress: u16, value: u8);
 }
 
 impl dyn Mapper {
