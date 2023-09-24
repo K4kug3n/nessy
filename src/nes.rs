@@ -2,10 +2,11 @@ use crate::cpu::Cpu;
 use crate::memory::Memory;
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
+use crate::ppu::Ppu;
 
 pub struct Nes {
-
 	cpu: Cpu,
+	ppu: Ppu,
 	memory:  Memory,
 }
 
@@ -15,6 +16,7 @@ impl Nes {
 
 		Nes {
 			cpu: Cpu::new(),
+			ppu: Ppu::new(cartridge.mirroring),
 			memory: Memory::new(mapper),
 		}
 	}

@@ -5,6 +5,7 @@ pub struct Cartridge {
 	pub mirroring: Mirroring
 }
 
+#[derive(Clone, Copy)]
 pub enum Mirroring {
 	Vertical,
 	Horizontal,
