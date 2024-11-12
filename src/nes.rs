@@ -21,7 +21,8 @@ impl Nes {
 		}
 	}
 
-	pub fn play(&mut self) {
-		self.cpu.step(&mut self.memory);
+	pub fn run(&mut self) {
+		self.cpu.reset(&mut self.memory);
+		self.cpu.run(&mut self.memory);
 	}
 }

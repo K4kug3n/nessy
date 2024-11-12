@@ -15,3 +15,12 @@ impl dyn Mapper {
 		}
 	}
 }
+
+pub mod test {
+use super::*;
+
+	pub fn test_mapper() -> Box<dyn Mapper> {
+		// Empty Nrom
+		Box::new(Nrom::new(vec![0; 16384*2], vec![0; 8192]))
+	}
+}

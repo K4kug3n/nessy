@@ -14,5 +14,5 @@ fn main() {
 
     let mut nes = Nes::new(&cartridge);
 
-    //nes.play();
+    nes.run();
 }

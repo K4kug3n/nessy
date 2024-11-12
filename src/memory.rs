@@ -57,6 +57,14 @@ impl Memory {
 			_ => panic!("{} not adressed in cpu", adress)
 		}
 	}
+
+	pub fn write_u16(&mut self, adress: u16, value: u16) {
+		let low = (value & 0x00FF) as u8;
+		let high = (value >> 8) as u8;
+		
+		self.write(adress, low);
+		self.write(adress + 1, high);
+	}
 }
 
 #[cfg(test)]
