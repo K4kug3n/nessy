@@ -81,7 +81,8 @@ enum Instruction {
 	Tsx,
 	Txa,
 	Txs,
-	Tya,
+	Tya
+}
 
 impl fmt::Display for Instruction {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -129,8 +130,8 @@ impl Cpu {
 	}
 
 	pub fn reset(&mut self, memory: &mut Memory) {
-		self.sp = 0xFF;
-		self.set_status(0);
+		self.sp = 0xFD;
+		self.set_status(0b100100);
 
 		self.pc = memory.read_u16(0xFFFC);
 	}
@@ -193,8 +194,8 @@ impl Cpu {
 		self.c = p & 0x01;
 	}
 
-	fn get_status(&mut self) -> u8 {
-		(self.n << 7) + (self.v << 6) + (self.b << 4) + (self.d << 3) + (self.i << 2) + (self.z << 1) + self.c
+	fn get_status(&self) -> u8 {
+		(self.n << 7) + (self.v << 6) + (1 << 5) + (self.b << 4) + (self.d << 3) + (self.i << 2) + (self.z << 1) + self.c
 	}
 
 	fn is_crossing(origin: u16, next: u16) -> bool {
@@ -207,10 +208,12 @@ impl Cpu {
 		value
 	}
 
-	fn fetch_relative(&mut self, memory: &Memory) -> i8 {
-		let adress = self.fetch(memory);
+	fn fetch_relative(&mut self, memory: &Memory) -> u16 {
+		let value = self.fetch(memory);
 
-		i8::try_from(i16::from(adress) - 128).unwrap() 
+		let offset = i8::try_from(value).unwrap();
+
+		u16::try_from(i32::from(self.pc) + i32::from(offset)).unwrap()
 	}
 
 	fn fetch_absolute_adress(&mut self, memory: &Memory) -> u16 {
@@ -228,7 +231,7 @@ impl Cpu {
 
 	fn fetch_x_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
 		let absolute = self.fetch_absolute_adress(memory);
-		let adress = absolute + u16::from(self.x);
+		let adress = absolute.wrapping_add(self.x as u16);
 
 		self.extra_cycle = u8::from(Cpu::is_crossing(absolute, adress));
 
@@ -236,8 +239,8 @@ impl Cpu {
 	}
 
 	fn fetch_y_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
-		let absolute = self.fetch_absolute_adress(memory) + u16::from(self.y);
-		let adress = absolute + u16::from(self.y);
+		let absolute = self.fetch_absolute_adress(memory);
+		let adress = absolute.wrapping_add(self.y as u16);
 
 		self.extra_cycle = u8::from(Cpu::is_crossing(absolute, adress));
 
@@ -249,28 +252,29 @@ impl Cpu {
 	}
 
 	fn fetch_x_indexed_zero_page_adress(&mut self, memory: &Memory) -> u16 {
-		(self.fetch_zero_page_adress(memory) + u16::from(self.x)) & 0x00ff
+		self.fetch(memory).wrapping_add(self.x) as u16
 	}
 
 	fn fetch_y_indexed_zero_page_adress(&mut self, memory: &Memory) -> u16 {
-		(self.fetch_zero_page_adress(memory) + u16::from(self.y)) & 0x00ff
+		self.fetch(memory).wrapping_add(self.y) as u16
 	}
 
 	fn fetch_x_indexed_zero_page_indirect_adress(&mut self, memory: &Memory) -> u16 {
-		let indirect = self.fetch_x_indexed_zero_page_adress(memory);
+		let indirect = self.fetch(memory).wrapping_add(self.x);
 		
-		debug_assert!(((indirect+1) & 0xff00) == 0); // Next memory loc must be on zero page
-
-		// Little endian
-		u16::from(memory.read(indirect)) + (u16::from(memory.read(indirect+1)) << 8)
+		// Next memory loc must be on zero page
+		// Little endian in memory
+		(u16::from(memory.read(indirect.wrapping_add(1) as u16)) << 8) | u16::from(memory.read(indirect as u16))
 	}
 
 	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, memory: &Memory) -> u16 {
-		let pointer = self.fetch_zero_page_adress(memory);
+		let pointer = self.fetch(memory);
 
 		// Little endian
-		let indirect = u16::from(memory.read(pointer)) + (u16::from(memory.read(pointer+1)) << 8);
-		let adress = indirect + u16::from(self.y);
+		let lo = memory.read(pointer as u16) as u16;
+		let hi = memory.read(pointer.wrapping_add(1) as u16) as u16;
+		let indirect = lo | (hi << 8);
+		let adress = indirect.wrapping_add(self.y as u16);
 
 		self.extra_cycle = u8::from(Cpu::is_crossing(indirect, adress)); // is_crossing
 
@@ -307,8 +311,8 @@ impl Cpu {
 			0xB0 => (Instruction::Bcs, AddrMode::Relative, 2, 2 /* + p + t */),
 			0xF0 => (Instruction::Beq, AddrMode::Relative, 2, 2 /* + p + t */),
 
-			0x24 => (Instruction::Bit, AddrMode::ZeroPage, 3, 4),
-			0x2C => (Instruction::Bit, AddrMode::Absolute, 2, 3),
+			0x2C => (Instruction::Bit, AddrMode::Absolute, 3, 4),
+			0x24 => (Instruction::Bit, AddrMode::ZeroPage, 2, 3),
 
 			0x30 => (Instruction::Bmi, AddrMode::Relative, 2, 2 /* + p + t */),
 			0xD0 => (Instruction::Bne, AddrMode::Relative, 2, 2 /* + p + t */),
@@ -406,7 +410,7 @@ impl Cpu {
 			0x19 => (Instruction::Ora, AddrMode::YIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
 			0x05 => (Instruction::Ora, AddrMode::ZeroPage, 2, 3),
 			0x15 => (Instruction::Ora, AddrMode::XIndexedZeroPage, 2, 4),
-			0x01 => (Instruction::Ora, AddrMode::YIndexedZeroPage, 2, 6),
+			0x01 => (Instruction::Ora, AddrMode::XIndexedZeroPageIndirect, 2, 6),
 			0x11 => (Instruction::Ora, AddrMode::ZeroPageIndirectYIndexed, 2, 5 /* + self.extra_cycle */),
 
 			0x48 => (Instruction::Pha, AddrMode::None, 1, 3),
@@ -450,7 +454,7 @@ impl Cpu {
 			0x81 => (Instruction::Sta, AddrMode::XIndexedZeroPageIndirect, 2, 6),
 			0x91 => (Instruction::Sta, AddrMode::ZeroPageIndirectYIndexed, 2, 6),
 
-			0x8E => (Instruction::Stx, AddrMode::Absolute, 2, 4),
+			0x8E => (Instruction::Stx, AddrMode::Absolute, 3, 4),
 			0x86 => (Instruction::Stx, AddrMode::ZeroPage, 2, 3),
 			0x96 => (Instruction::Stx, AddrMode::YIndexedZeroPage, 2, 4),
 
@@ -486,6 +490,7 @@ impl Cpu {
 			AddrMode::YIndexedZeroPage => self.fetch_y_indexed_zero_page_adress(memory),
 			AddrMode::XIndexedZeroPageIndirect => self.fetch_x_indexed_zero_page_indirect_adress(memory),
 			AddrMode::ZeroPageIndirectYIndexed => self.fetch_zero_page_indirect_y_indexed_adress(memory),
+			AddrMode::Relative => self.fetch_relative(memory),
 			_ => {
 				panic!("Adress mode '{:?}' not usable to get adress", addr_mode);
 			}
@@ -593,8 +598,6 @@ impl Cpu {
 			},
 			Instruction::Txs => {
 				self.sp = self.x;
-				self.z = u8::from(self.x == 0);
-				self.n = self.x >> 7;
 			},
 			Instruction::Tya => {
 				self.a = self.y;
@@ -606,11 +609,9 @@ impl Cpu {
 	}
 
 	fn apply_branch(&mut self, memory: &Memory, condition: bool) {
+		let adress = self.fetch_relative(memory); // Advance the pc
+
 		if condition {
-			let offset = self.fetch_relative(memory);
-
-			let adress = u16::try_from(i32::from(self.pc) + i32::from(offset)).unwrap();
-
 			self.extra_cycle = 1 + u8::from(Cpu::is_crossing(self.pc, adress));
 
 			self.pc = adress
@@ -621,15 +622,7 @@ impl Cpu {
 		let adress = self.get_op_adress(memory, addr_mode);
 		let value = memory.read(adress);
 
-		let (temp, overflowed_1) = u8::overflowing_add(self.a, value);
-		let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
-		
-		self.c = u8::from(overflowed_1 || overflowed_2);
-		self.v = u8::from((value & 0x80) != (result & 0x80));
-		self.n = result >> 7;
-		self.z = u8::from(result == 0);
-		
-		self.a = result;
+		self.add_to_accumulator(value);
 	}
 
 	fn apply_and_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
@@ -664,7 +657,7 @@ impl Cpu {
 		self.n = result >> 7;
 		self.z = u8::from(result == 0);
 
-		memory.write(adress, value);
+		memory.write(adress, result);
 	}
 
 	fn apply_bit_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
@@ -701,16 +694,16 @@ impl Cpu {
 	fn apply_dec_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(memory, addr_mode);
 		let value = memory.read(adress);
-		let (result, _) = value.overflowing_sub(1);
+		let result = value.wrapping_sub(1);
 
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
 
-		memory.write(adress, value);
+		memory.write(adress, result);
 	}
 
 	fn apply_dex_op(&mut self) {
-		let (result, _) = self.x.overflowing_sub(1);
+		let result = self.x.wrapping_sub(1);
 
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
@@ -719,7 +712,7 @@ impl Cpu {
 	}
 
 	fn apply_dey_op(&mut self) {
-		let (result, _) = self.y.overflowing_sub(1);
+		let result = self.y.wrapping_sub(1);
 
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
@@ -764,13 +757,13 @@ impl Cpu {
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
 
-		self.x = result;
+		self.y = result;
 	}
 
 	fn apply_jsr_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(memory, addr_mode);
-		let low_pc = u8::try_from(self.pc & 0x00FF).unwrap();
-		let high_pc = u8::try_from((self.pc & 0xFF00) >> 8).unwrap();
+		let low_pc = u8::try_from((self.pc - 1) & 0x00FF).unwrap();
+		let high_pc = u8::try_from(((self.pc - 1) & 0xFF00) >> 8).unwrap();
 
 		self.stack_push(memory, high_pc);
 		self.stack_push(memory, low_pc);
@@ -827,17 +820,20 @@ impl Cpu {
 	fn apply_php_op(&mut self, memory: &mut Memory) {
 		let p = self.get_status();
 		
-		self.stack_push(memory, p);
+		self.stack_push(memory, p | 0b0001_0000); // Set B
 	}
 
 	fn apply_pla_op(&mut self, memory: &Memory) {
 		self.a = self.stack_pop(memory);
+
+		self.z = u8::from(self.a == 0);
+		self.n = self.a >> 7;
 	}
 
 	fn apply_plp_op(&mut self, memory: &Memory) {
 		let p = self.stack_pop(memory);
 
-		self.set_status(p);
+		self.set_status(p & 0b1110_1111); // Remove B
 	}
 
 	fn apply_rol_accumulator_op(&mut self) {
@@ -882,8 +878,10 @@ impl Cpu {
 
 	fn apply_rti_op(&mut self, memory: &Memory) {
 		let p = self.stack_pop(memory);
-		self.apply_rts_op(memory);
+		let low_pc = u16::from(self.stack_pop(memory));
+		let high_pc = u16::from(self.stack_pop(memory));
 
+		self.pc = (high_pc << 8) + low_pc;
 		self.set_status(p);
 	}
 
@@ -891,17 +889,22 @@ impl Cpu {
 		let low_pc = u16::from(self.stack_pop(memory));
 		let high_pc = u16::from(self.stack_pop(memory));
 
-		self.pc = (high_pc << 8) + low_pc;
+		self.pc = (high_pc << 8) + low_pc + 1;
 	}
 
 	fn apply_sbc_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(memory, addr_mode);
 		let value = memory.read(adress);
-		let (temp, overflowed_1) = u8::overflowing_sub(self.a, value);
-		let (result, overflowed_2) = u8::overflowing_add(temp, 1 - self.c);
+
+		self.add_to_accumulator((value as i8).wrapping_neg().wrapping_sub(1) as u8);
+	}
+
+	fn add_to_accumulator(&mut self, value: u8) {
+		let (temp, overflowed_1) = u8::overflowing_add(self.a, value);
+		let (result, overflowed_2) = u8::overflowing_add(temp, self.c);
 		
-		self.c = !result >> 7; // Greater or equal to 0
-		self.v = u8::from(overflowed_1 || overflowed_2);
+		self.c = u8::from(overflowed_1 || overflowed_2);
+		self.v =  u8::from(!(((self.a ^ value) & 0x80) != 0) && (((self.a ^ result) & 0x80) != 0));
 		self.n = result >> 7;
 		self.z = u8::from(result == 0);
 		
@@ -1124,5 +1127,23 @@ mod tests {
         cpu.load_and_run(&mut memory, &vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
 
         assert_eq!(cpu.x, 0xc1)
+    }
+
+	#[test]
+    fn test_status() {
+		//  7 6 5 4 3 2 1 0
+    	//  N V _ B D I Z C
+    	//  | |   | | | | +--- Carry Flag
+    	//  | |   | | | +----- Zero Flag
+    	//  | |   | | +------- Interrupt Disable
+    	//  | |   | +--------- Decimal Mode (not used on NES)
+    	//  | |   +----------- Break Command
+    	//  | +--------------- Overflow Flag
+   		//  +----------------- Negative Flag
+        let mut cpu = Cpu::new();
+		cpu.set_status(0b0010_0100);
+
+		assert_eq!(cpu.i, 1);
+		assert_eq!(cpu.get_status(), 0b0010_0100);
     }
 }
