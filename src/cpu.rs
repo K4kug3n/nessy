@@ -1,7 +1,10 @@
+use core::panic;
+use std::fmt;
+
 use crate::memory::Memory;
 
 pub struct Cpu {
-	pc: u16,
+	pub pc: u16,
 	sp: u8,
 
 	// Registers
@@ -21,6 +24,7 @@ pub struct Cpu {
 	extra_cycle: u8
 }
 
+#[derive(Debug)]
 enum Instruction {
 	Adc,
 	And,
@@ -79,6 +83,10 @@ enum Instruction {
 	Txs,
 	Tya,
 
+impl fmt::Display for Instruction {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{:?}", self)
+	}
 }
 
 #[derive(Debug)]
@@ -102,7 +110,7 @@ impl Cpu {
 	pub fn new() -> Cpu {
 		Cpu {
 			pc: 0x00,
-			sp: 0xFF,
+			sp: 0xFD,
 
 			a: 0,
 			x: 0,
@@ -129,19 +137,19 @@ impl Cpu {
 
 	pub fn run(&mut self, memory: &mut Memory)
 	{
-		self.run_with_callback(memory, |_|{});
+		self.run_with_callback(memory, |_, _|{});
 	}
 
 	pub fn run_with_callback<F>(&mut self, memory: &mut Memory, mut callback: F) 
 	where 
-		F: FnMut(&mut Cpu),
+		F: FnMut(&mut Cpu, &Memory),
 	{
 		loop {
-			callback(self);
+			callback(self, &memory);
 
 			let opcode = self.fetch(memory);
 
-			let (instr, addr_mode, size, cycle) = self.decode(opcode);
+			let (instr, addr_mode, _, _) = self.decode(opcode);
 			if let Instruction::Brk = instr {
 				break;
 			}
@@ -151,6 +159,7 @@ impl Cpu {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub fn load_and_run(&mut self, memory: &mut Memory, pgr: &Vec<u8>) {
 		for i in 0..(pgr.len() as u16) {
 			memory.write(0x0200 + i, pgr[i as usize]);
@@ -900,6 +909,69 @@ impl Cpu {
 	}
 }
 
+pub fn trace(cpu: &mut Cpu, memory: &Memory) -> String {
+	let pc = cpu.pc;
+	
+	let opcode = cpu.fetch(memory);
+
+	let (instr, addr_mode, size, _) = cpu.decode(opcode);
+
+	let mut hex_codes = vec![opcode];
+	let asm_suffix = match size {
+		1 => match addr_mode {
+			AddrMode::Accumulator => String::from("A "),
+			_ => String::from("")
+		},
+		2 => {
+			let arg = memory.read(pc + 1);
+			hex_codes.push(arg);
+
+			let adress = cpu.get_op_adress(memory, &addr_mode);
+			match addr_mode {
+				AddrMode::Immediate => format!("#${:02x}", arg),
+				AddrMode::ZeroPage => format!("${:02x} = {:02x}", arg, memory.read(adress)),
+				AddrMode::XIndexedZeroPage => format!("${:02x},X @ {:02x} = {:02x}", arg, adress, memory.read(adress)),
+				AddrMode::YIndexedZeroPage => format!("${:02x},Y @ {:02x} = {:02x}", arg, adress, memory.read(adress)),
+				AddrMode::XIndexedZeroPageIndirect => format!("(${:02x},X) @ {:02x} = {:04x} = {:02x}", arg, cpu.x.wrapping_add(arg), adress, memory.read(adress)),
+				AddrMode::ZeroPageIndirectYIndexed => {
+					let lo = u16::from(memory.read(arg as u16));
+					let hi = u16::from(memory.read(arg.wrapping_add(1) as u16));
+					let indirect = lo + (hi << 8);
+					format!("(${:02x}),Y = {:04x} @ {:04x} = {:02x}", arg, indirect, adress, memory.read(adress))
+				},
+				AddrMode::Relative =>  format!("${:04x}", adress),
+				_ => panic!("Unexpected addressing mode {:?} with instruction's size {}", addr_mode, size)
+			}
+		},
+		3 => {
+			let lo_byte = memory.read(pc + 1);
+			let hi_byte = memory.read(pc + 2);
+			hex_codes.push(lo_byte);
+			hex_codes.push(hi_byte);
+			let arg = u16::from(lo_byte) + (u16::from(hi_byte) << 8);
+
+			let adress = cpu.get_op_adress(memory, &addr_mode);
+			match addr_mode {
+				AddrMode::Absolute => match instr {
+					Instruction::Jmp | Instruction::Jsr => format!("${:04x}", adress),
+					_ => format!("${:04x} = {:02x}", adress, memory.read(adress))
+				},
+				AddrMode::XIndexedAbsolute => format!("${:04x},X @ {:04x} = {:02x}", arg, adress, memory.read(adress)),
+				AddrMode::YIndexedAbsolute => format!("${:04x},Y @ {:04x} = {:02x}", arg, adress, memory.read(adress)),
+				AddrMode::AbsoluteIndirect => format!("(${:04x}) = {:04x}", arg, adress),
+				_ => panic!("Unexpected addressing mode {:?} with instruction's size {}", addr_mode, size)
+			}
+		},
+		_ => panic!("Unexpected size of instruction: {}", size)
+	};
+
+	let hex_str = hex_codes.iter().map(|i| format!("{:02x}", i)).collect::<Vec<String>>().join(" ");
+	let asm_str = format!("{} {}", instr, asm_suffix);
+
+	cpu.pc = pc;
+
+	format!("{:04x}  {:<8}  {:<30}  A:{:02x} X:{:02x} Y:{:02x} P:{:02x} SP:{:02x}", pc, hex_str, asm_str, cpu.a, cpu.x, cpu.y, cpu.get_status(), cpu.sp).to_ascii_uppercase()
+}
 
 #[cfg(test)]
 mod tests {
