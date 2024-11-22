@@ -81,12 +81,26 @@ enum Instruction {
 	Tsx,
 	Txa,
 	Txs,
-	Tya
+	Tya,
+	// Undocumented opcode
+	Dop,
+	Top,
+	Lax,
+	Sax, // Aax
+	Dcp,
+	Isb, // Isc
+	Slo,
+	Sre,
+	Rla,
+	Rra,
 }
 
 impl fmt::Display for Instruction {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:?}", self)
+		match *self {
+			Instruction::Dop | Instruction::Top => write!(f, "NOP"),
+			_ => write!(f, "{:?}", self)
+		}
 	}
 }
 
@@ -472,6 +486,99 @@ impl Cpu {
 			0x9A => (Instruction::Txs, AddrMode::None, 1, 2),
 			0x98 => (Instruction::Tya, AddrMode::None, 1, 2),
 
+			// Undocumented opcode
+			0x04 => (Instruction::Dop, AddrMode::ZeroPage, 2, 3),
+			0x14 => (Instruction::Dop, AddrMode::XIndexedZeroPage, 2, 4),
+			0x34 => (Instruction::Dop, AddrMode::XIndexedZeroPage, 2, 4),
+			0x44 => (Instruction::Dop, AddrMode::ZeroPage, 2, 3),
+			0x54 => (Instruction::Dop, AddrMode::XIndexedZeroPage, 2, 4),
+			0x64 => (Instruction::Dop, AddrMode::ZeroPage, 2, 3),
+			0x74 => (Instruction::Dop, AddrMode::XIndexedZeroPage, 2, 4),
+			0x80 => (Instruction::Dop, AddrMode::Immediate, 2, 2),
+			0x82 => (Instruction::Dop, AddrMode::Immediate, 2, 2),
+			0x89 => (Instruction::Dop, AddrMode::Immediate, 2, 2),
+			0xC2 => (Instruction::Dop, AddrMode::Immediate, 2, 2),
+			0xD4 => (Instruction::Dop, AddrMode::XIndexedZeroPage, 2, 4),
+			0xE2 => (Instruction::Dop, AddrMode::Immediate, 2, 2),
+			0xF4 => (Instruction::Dop, AddrMode::XIndexedZeroPage, 2, 4),
+
+			0x0C => (Instruction::Top, AddrMode::Absolute, 3, 4),
+			0x1C => (Instruction::Top, AddrMode::XIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+			0x3C => (Instruction::Top, AddrMode::XIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+			0x5C => (Instruction::Top, AddrMode::XIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+			0x7C => (Instruction::Top, AddrMode::XIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+			0xDC => (Instruction::Top, AddrMode::XIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+			0xFC => (Instruction::Top, AddrMode::XIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+
+			0x1A => (Instruction::Nop, AddrMode::None, 1, 2),
+			0x3A => (Instruction::Nop, AddrMode::None, 1, 2),
+			0x5A => (Instruction::Nop, AddrMode::None, 1, 2),
+			0x7A => (Instruction::Nop, AddrMode::None, 1, 2),
+			0xDA => (Instruction::Nop, AddrMode::None, 1, 2),
+			0xFA => (Instruction::Nop, AddrMode::None, 1, 2),
+
+			0xA7 => (Instruction::Lax, AddrMode::ZeroPage, 2, 3),
+			0xB7 => (Instruction::Lax, AddrMode::YIndexedZeroPage, 2, 4),
+			0xAF => (Instruction::Lax, AddrMode::Absolute, 3, 4),
+			0xBF => (Instruction::Lax, AddrMode::YIndexedAbsolute, 3, 4 /* + self.extra_cycle */),
+			0xA3 => (Instruction::Lax, AddrMode::XIndexedZeroPageIndirect, 2, 6),
+			0xB3 => (Instruction::Lax, AddrMode::ZeroPageIndirectYIndexed, 2, 5 /* + self.extra_cycle */),
+
+			0x87 => (Instruction::Sax, AddrMode::ZeroPage, 2, 3),
+			0x97 => (Instruction::Sax, AddrMode::YIndexedZeroPage, 2, 4),
+			0x83 => (Instruction::Sax, AddrMode::XIndexedZeroPageIndirect, 2, 6),
+			0x8F => (Instruction::Sax, AddrMode::Absolute, 3, 4),
+
+			0xEB => (Instruction::Sbc, AddrMode::Immediate, 2, 2),
+
+			0xC7 => (Instruction::Dcp, AddrMode::ZeroPage, 2, 5),
+			0xD7 => (Instruction::Dcp, AddrMode::XIndexedZeroPage, 2, 6),
+			0xCF => (Instruction::Dcp, AddrMode::Absolute, 3, 6),
+			0xDF => (Instruction::Dcp, AddrMode::XIndexedAbsolute, 3, 7),
+			0xDB => (Instruction::Dcp, AddrMode::YIndexedAbsolute, 3, 7),
+			0xC3 => (Instruction::Dcp, AddrMode::XIndexedZeroPageIndirect, 2, 8),
+			0xD3 => (Instruction::Dcp, AddrMode::ZeroPageIndirectYIndexed, 2, 8),
+
+			0xE7 => (Instruction::Isb, AddrMode::ZeroPage, 2, 5),
+			0xF7 => (Instruction::Isb, AddrMode::XIndexedZeroPage, 2, 6),
+			0xEF => (Instruction::Isb, AddrMode::Absolute, 3, 6),
+			0xFF => (Instruction::Isb, AddrMode::XIndexedAbsolute, 3, 7),
+			0xFB => (Instruction::Isb, AddrMode::YIndexedAbsolute, 3, 7),
+			0xE3 => (Instruction::Isb, AddrMode::XIndexedZeroPageIndirect, 2, 8),
+			0xF3 => (Instruction::Isb, AddrMode::ZeroPageIndirectYIndexed, 2, 8),
+
+			0x07 => (Instruction::Slo, AddrMode::ZeroPage, 2, 5),
+			0x17 => (Instruction::Slo, AddrMode::XIndexedZeroPage, 2, 6),
+			0x0F => (Instruction::Slo, AddrMode::Absolute, 3, 6),
+			0x1F => (Instruction::Slo, AddrMode::XIndexedAbsolute, 3, 7),
+			0x1B => (Instruction::Slo, AddrMode::YIndexedAbsolute, 3, 7),
+			0x03 => (Instruction::Slo, AddrMode::XIndexedZeroPageIndirect, 2, 8),
+			0x13 => (Instruction::Slo, AddrMode::ZeroPageIndirectYIndexed, 2, 8),
+
+			0x47 => (Instruction::Sre, AddrMode::ZeroPage, 2, 5),
+			0x57 => (Instruction::Sre, AddrMode::XIndexedZeroPage, 2, 6),
+			0x4F => (Instruction::Sre, AddrMode::Absolute, 3, 6),
+			0x5F => (Instruction::Sre, AddrMode::XIndexedAbsolute, 3, 7),
+			0x5B => (Instruction::Sre, AddrMode::YIndexedAbsolute, 3, 7),
+			0x43 => (Instruction::Sre, AddrMode::XIndexedZeroPageIndirect, 2, 8),
+			0x53 => (Instruction::Sre, AddrMode::ZeroPageIndirectYIndexed, 2, 8),
+
+			0x27 => (Instruction::Rla, AddrMode::ZeroPage, 2, 5),
+			0x37 => (Instruction::Rla, AddrMode::XIndexedZeroPage, 2, 6),
+			0x2F => (Instruction::Rla, AddrMode::Absolute, 3, 6),
+			0x3F => (Instruction::Rla, AddrMode::XIndexedAbsolute, 3, 7),
+			0x3B => (Instruction::Rla, AddrMode::YIndexedAbsolute, 3, 7),
+			0x23 => (Instruction::Rla, AddrMode::XIndexedZeroPageIndirect, 2, 8),
+			0x33 => (Instruction::Rla, AddrMode::ZeroPageIndirectYIndexed, 2, 8),
+
+			0x67 => (Instruction::Rra, AddrMode::ZeroPage, 2, 5),
+			0x77 => (Instruction::Rra, AddrMode::XIndexedZeroPage, 2, 6),
+			0x6F => (Instruction::Rra, AddrMode::Absolute, 3, 6),
+			0x7F => (Instruction::Rra, AddrMode::XIndexedAbsolute, 3, 7),
+			0x7B => (Instruction::Rra, AddrMode::YIndexedAbsolute, 3, 7),
+			0x63 => (Instruction::Rra, AddrMode::XIndexedZeroPageIndirect, 2, 8),
+			0x73 => (Instruction::Rra, AddrMode::ZeroPageIndirectYIndexed, 2, 8),
+
 			_ => {
 				panic!("Opcode '{:#02x}' not implemented", opcode);
 			}
@@ -607,8 +714,20 @@ impl Cpu {
 				self.z = u8::from(self.y == 0);
 				self.n = self.y >> 7;
 			},
-			Instruction::Nop => {}
-		}
+			Instruction::Nop => {},
+
+			//Undocumented opcode
+			Instruction::Dop => self.pc += 1, // Skip args
+			Instruction::Top => self.pc += 2,
+			Instruction::Lax => self.apply_lax_op(memory, addr_mode),
+			Instruction::Sax => self.apply_sax_op(memory, addr_mode),
+			Instruction::Dcp => self.apply_dcp_op(memory, addr_mode),
+			Instruction::Isb => self.apply_isb_op(memory, addr_mode),
+			Instruction::Slo => self.apply_slo_op(memory, addr_mode),
+			Instruction::Sre => self.apply_sre_op(memory, addr_mode),
+			Instruction::Rla => self.apply_rla_op(memory, addr_mode),
+			Instruction::Rra => self.apply_rra_op(memory, addr_mode),
+		}	
 	}
 
 	fn apply_branch(&mut self, memory: &Memory, condition: bool) {
@@ -899,7 +1018,7 @@ impl Cpu {
 		let adress = self.get_op_adress(memory, addr_mode);
 		let value = memory.read(adress);
 
-		self.add_to_accumulator((value as i8).wrapping_neg().wrapping_sub(1) as u8);
+		self.sub_to_accumulator(value);
 	}
 
 	fn add_to_accumulator(&mut self, value: u8) {
@@ -912,6 +1031,100 @@ impl Cpu {
 		self.z = u8::from(result == 0);
 		
 		self.a = result;
+	}
+
+	fn sub_to_accumulator(&mut self, value: u8) {
+		self.add_to_accumulator((value as i8).wrapping_neg().wrapping_sub(1) as u8);
+	}
+
+	fn apply_lax_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let value = memory.read(adress);
+
+		self.a = value;
+		self.x = value;
+
+		self.n = value >> 7;
+		self.z = u8::from(value == 0);
+	}
+
+	fn apply_sax_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		
+		let result = self.x & self.a;
+		memory.write(adress, result);
+
+		//self.n = result >> 7;
+		//self.z = u8::from(result == 0);
+	}
+
+	fn apply_dcp_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let mut value = memory.read(adress);
+		value = value.wrapping_sub(1);
+		memory.write(adress, value);
+		
+		let result = self.a.wrapping_sub(value);
+		self.z = u8::from(result == 0);
+		self.n = result >> 7;
+		self.c = u8::from(value <= self.a);
+	}
+
+	fn apply_isb_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let mut value = memory.read(adress);
+		value = value.wrapping_add(1);
+		memory.write(adress, value);
+		
+		self.sub_to_accumulator(value);
+	}
+
+	fn apply_slo_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let value = memory.read(adress);
+		let result = value << 1;
+		memory.write(adress, result);
+
+		self.a = self.a | result;
+		self.z = u8::from(self.a == 0);
+		self.n = self.a >> 7;
+		self.c = value >> 7;
+	}
+
+	fn apply_sre_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let value = memory.read(adress);
+		let result = value >> 1;
+		memory.write(adress, result);
+
+		self.c = value & 0x01;
+		// EOR
+		self.a = self.a ^ result;
+		self.z = u8::from(self.a == 0);
+		self.n = self.a >> 7;
+	}
+
+	fn apply_rla_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let value = memory.read(adress);
+		let result = value << 1 | (self.c & 0x01);
+		memory.write(adress, result);
+
+		self.a = self.a & result;
+		self.z = u8::from(self.a == 0);
+		self.n = self.a >> 7;
+		self.c = value >> 7;
+	}
+
+	fn apply_rra_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(memory, addr_mode);
+		let value = memory.read(adress);
+		let result = (self.c << 7) | (value >> 1);
+		memory.write(adress, result);
+
+		self.c = value & 0x01;
+
+		self.add_to_accumulator(result);
 	}
 }
 
@@ -970,13 +1183,19 @@ pub fn trace(cpu: &mut Cpu, memory: &Memory) -> String {
 		},
 		_ => panic!("Unexpected size of instruction: {}", size)
 	};
+	let instr_prefix = match (opcode, &instr) {
+		(_, Instruction::Dop) | (_, Instruction::Top) | (_, Instruction::Lax) | (_, Instruction::Sax) | (_, Instruction::Dcp) | (_, Instruction::Isb) | (_, Instruction::Slo) | (_, Instruction::Rla) | (_, Instruction::Sre) | (_, Instruction::Rra) => "*",
+		(0x1A, _) | (0x3A, _) | (0x5A, _) | (0x7A, _) | (0xDA, _) | (0xFA, _) => "*", // Nop undoc
+		(0xEB, _) => "*", // Sbc undoc
+		_ => " "
+	};
 
 	let hex_str = hex_codes.iter().map(|i| format!("{:02x}", i)).collect::<Vec<String>>().join(" ");
-	let asm_str = format!("{} {}", instr, asm_suffix);
+	let asm_str = format!("{}{} {}", instr_prefix, instr, asm_suffix);
 
 	cpu.pc = pc;
 
-	format!("{:04x}  {:<8}  {:<30}  A:{:02x} X:{:02x} Y:{:02x} P:{:02x} SP:{:02x}", pc, hex_str, asm_str, cpu.a, cpu.x, cpu.y, cpu.get_status(), cpu.sp).to_ascii_uppercase()
+	format!("{:04x}  {:<8} {:<31}  A:{:02x} X:{:02x} Y:{:02x} P:{:02x} SP:{:02x}", pc, hex_str, asm_str, cpu.a, cpu.x, cpu.y, cpu.get_status(), cpu.sp).to_ascii_uppercase()
 }
 
 #[cfg(test)]
