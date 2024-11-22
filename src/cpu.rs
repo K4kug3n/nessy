@@ -211,9 +211,12 @@ impl Cpu {
 	fn fetch_relative(&mut self, memory: &Memory) -> u16 {
 		let value = self.fetch(memory);
 
-		let offset = i8::try_from(value).unwrap();
+		let mut offset = i32::from(value);
+		if value >> 7 != 0 { // is a negative
+			offset -= 256
+		}
 
-		u16::try_from(i32::from(self.pc) + i32::from(offset)).unwrap()
+		u16::try_from(i32::from(self.pc) + offset).unwrap()
 	}
 
 	fn fetch_absolute_adress(&mut self, memory: &Memory) -> u16 {
@@ -568,8 +571,8 @@ impl Cpu {
 				}
 			},
 			Instruction::Rti => self.apply_rti_op(memory),
-			Instruction::Rts =>  self.apply_rts_op(memory),
-			Instruction::Sbc =>  self.apply_sbc_op(memory, addr_mode),
+			Instruction::Rts => self.apply_rts_op(memory),
+			Instruction::Sbc => self.apply_sbc_op(memory, addr_mode),
 			Instruction::Sec => self.c = 1,
 			Instruction::Sed => self.d = 1,
 			Instruction::Sei => self.i = 1,
