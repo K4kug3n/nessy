@@ -1,7 +1,7 @@
-pub struct Cartridge {
-	pub pgr_rom: Vec<u8>,
-	pub chr_rom: Vec<u8>,
-	pub mapper: u8,
+use crate::mapper::Mapper;
+
+pub struct Rom {
+	pub mapper: Box<dyn Mapper>,
 	pub mirroring: Mirroring
 }
 
@@ -12,8 +12,8 @@ pub enum Mirroring {
 	FourScreen
 }
 
-impl Cartridge {
-	pub fn from_ines(buffer: &[u8]) -> Cartridge {
+impl Rom {
+	pub fn from_ines(buffer: &[u8]) -> Rom {
 		if buffer[0..=3] != [0x4e, 0x45, 0x53, 0x1a] {
 			panic!("Wrong constants")
 		}
@@ -45,15 +45,31 @@ impl Cartridge {
 		}
 
 		let high_mapper = if /* !nes_2 && */ buffer[12..=15] != [0x0, 0x0, 0x0, 0x0] { 0x0 } else { flag_7 & 0xf0 };
+		let mapper_id = high_mapper + (low_mapper >> 4);
 
 		let pgr_rom_idx = usize::from(if trainer { 512u16 + 16u16 } else { 16u16 });
 		let chr_rom_idx = pgr_rom_idx + pgr_rom_size;
 
-		Cartridge{ 
-			pgr_rom: buffer[pgr_rom_idx..(pgr_rom_idx + pgr_rom_size)].to_vec(),
-			chr_rom: buffer[chr_rom_idx..(chr_rom_idx + chr_rom_size)].to_vec(),
-			mapper: high_mapper + (low_mapper >> 4),
+		Rom { 
+			mapper: <dyn Mapper>::from_id(
+				mapper_id,
+				buffer[pgr_rom_idx..(pgr_rom_idx + pgr_rom_size)].to_vec(),
+				buffer[chr_rom_idx..(chr_rom_idx + chr_rom_size)].to_vec()
+			),
 			mirroring: screen_mirroring
+		}
+	}
+}
+
+pub mod test {
+	use super::*;
+	use crate::mapper::test;
+	
+	pub fn test_rom() -> Rom {
+		// Empty rom (Nrom)
+		Rom {
+			mapper: test::test_mapper(),
+			mirroring: Mirroring::Vertical
 		}
 	}
 }

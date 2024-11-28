@@ -1,7 +1,7 @@
 use core::panic;
 use std::fmt;
 
-use crate::memory::Memory;
+use crate::bus::Bus;
 
 pub struct Cpu {
 	pub pc: u16,
@@ -143,26 +143,26 @@ impl Cpu {
 		}
 	}
 
-	pub fn reset(&mut self, memory: &mut Memory) {
+	pub fn reset(&mut self, bus: &mut Bus) {
 		self.sp = 0xFD;
 		self.set_status(0b100100);
 
-		self.pc = memory.read_u16(0xFFFC);
+		self.pc = bus.read_u16(0xFFFC);
 	}
 
-	pub fn run(&mut self, memory: &mut Memory)
+	pub fn run(&mut self, bus: &mut Bus)
 	{
-		self.run_with_callback(memory, |_, _|{});
+		self.run_with_callback(bus, |_, _|{});
 	}
 
-	pub fn run_with_callback<F>(&mut self, memory: &mut Memory, mut callback: F) 
+	pub fn run_with_callback<F>(&mut self, bus: &mut Bus, mut callback: F) 
 	where 
-		F: FnMut(&mut Cpu, &Memory),
+		F: FnMut(&mut Cpu, &Bus),
 	{
 		loop {
-			callback(self, &memory);
+			callback(self, &bus);
 
-			let opcode = self.fetch(memory);
+			let opcode = self.fetch(bus);
 
 			let (instr, addr_mode, _, _) = self.decode(opcode);
 			if let Instruction::Brk = instr {
@@ -170,32 +170,32 @@ impl Cpu {
 			}
 
 			self.extra_cycle = 0;
-			self.execute(memory, &instr, &addr_mode);
+			self.execute(bus, &instr, &addr_mode);
 		}
 	}
 
 	#[allow(dead_code)]
-	pub fn load_and_run(&mut self, memory: &mut Memory, pgr: &Vec<u8>) {
+	pub fn load_and_run(&mut self, bus: &mut Bus, pgr: &Vec<u8>) {
 		for i in 0..(pgr.len() as u16) {
-			memory.write(0x0200 + i, pgr[i as usize]);
+			bus.write(0x0200 + i, pgr[i as usize]);
 		}
 
-		self.reset(memory);
+		self.reset(bus);
 		self.pc = 0x0200;
 
-		self.run(memory);
+		self.run(bus);
 	}
 
-	fn stack_push(&mut self, memory: &mut Memory, value: u8) {
-		memory.write(0x0100 + u16::from(self.sp), value);
+	fn stack_push(&mut self, bus: &mut Bus, value: u8) {
+		bus.write(0x0100 + u16::from(self.sp), value);
 
 		self.sp -= 1;
 	}
 
-	fn stack_pop(&mut self, memory: &Memory) -> u8 {
+	fn stack_pop(&mut self, bus: &Bus) -> u8 {
 		self.sp += 1;
 		
-		memory.read(0x0100 + u16::from(self.sp))
+		bus.read(0x0100 + u16::from(self.sp))
 	}
 
 	fn set_status(&mut self, p: u8) {
@@ -216,14 +216,14 @@ impl Cpu {
 		(origin & 0xFF00) != (next & 0xFF00)
 	}
 
-	fn fetch(&mut self, memory: &Memory) -> u8 {
-		let value = memory.read(self.pc);
+	fn fetch(&mut self, bus: &Bus) -> u8 {
+		let value = bus.read(self.pc);
 		self.pc += 1;
 		value
 	}
 
-	fn fetch_relative(&mut self, memory: &Memory) -> u16 {
-		let value = self.fetch(memory);
+	fn fetch_relative(&mut self, bus: &Bus) -> u16 {
+		let value = self.fetch(bus);
 
 		let mut offset = i32::from(value);
 		if value >> 7 != 0 { // is a negative
@@ -233,21 +233,21 @@ impl Cpu {
 		u16::try_from(i32::from(self.pc) + offset).unwrap()
 	}
 
-	fn fetch_absolute_adress(&mut self, memory: &Memory) -> u16 {
+	fn fetch_absolute_adress(&mut self, bus: &Bus) -> u16 {
 		// Little endian
-		u16::from(self.fetch(memory)) + (u16::from(self.fetch(memory)) << 8)
+		u16::from(self.fetch(bus)) + (u16::from(self.fetch(bus)) << 8)
 	}
 
-	fn fetch_absolute_indirect_adress(&mut self, memory: &Memory) -> u16 {
-		let low_indirect = self.fetch_absolute_adress(memory);
+	fn fetch_absolute_indirect_adress(&mut self, bus: &Bus) -> u16 {
+		let low_indirect = self.fetch_absolute_adress(bus);
 
 		let high_indirect = (low_indirect & 0xFF00) + ((low_indirect + 1) & 0x00FF); // Do not increment page
 
-		u16::from(memory.read(low_indirect)) + (u16::from(memory.read(high_indirect)) << 8)
+		u16::from(bus.read(low_indirect)) + (u16::from(bus.read(high_indirect)) << 8)
 	}
 
-	fn fetch_x_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
-		let absolute = self.fetch_absolute_adress(memory);
+	fn fetch_x_indexed_absolute_adress(&mut self, bus: &Bus) -> u16 {
+		let absolute = self.fetch_absolute_adress(bus);
 		let adress = absolute.wrapping_add(self.x as u16);
 
 		self.extra_cycle = u8::from(Cpu::is_crossing(absolute, adress));
@@ -255,8 +255,8 @@ impl Cpu {
 		adress
 	}
 
-	fn fetch_y_indexed_absolute_adress(&mut self, memory: &Memory) -> u16 {
-		let absolute = self.fetch_absolute_adress(memory);
+	fn fetch_y_indexed_absolute_adress(&mut self, bus: &Bus) -> u16 {
+		let absolute = self.fetch_absolute_adress(bus);
 		let adress = absolute.wrapping_add(self.y as u16);
 
 		self.extra_cycle = u8::from(Cpu::is_crossing(absolute, adress));
@@ -264,32 +264,32 @@ impl Cpu {
 		adress
 	}
 
-	fn fetch_zero_page_adress(&mut self, memory: &Memory) -> u16 {
-		u16::from(self.fetch(memory))
+	fn fetch_zero_page_adress(&mut self, bus: &Bus) -> u16 {
+		u16::from(self.fetch(bus))
 	}
 
-	fn fetch_x_indexed_zero_page_adress(&mut self, memory: &Memory) -> u16 {
-		self.fetch(memory).wrapping_add(self.x) as u16
+	fn fetch_x_indexed_zero_page_adress(&mut self, bus: &Bus) -> u16 {
+		self.fetch(bus).wrapping_add(self.x) as u16
 	}
 
-	fn fetch_y_indexed_zero_page_adress(&mut self, memory: &Memory) -> u16 {
-		self.fetch(memory).wrapping_add(self.y) as u16
+	fn fetch_y_indexed_zero_page_adress(&mut self, bus: &Bus) -> u16 {
+		self.fetch(bus).wrapping_add(self.y) as u16
 	}
 
-	fn fetch_x_indexed_zero_page_indirect_adress(&mut self, memory: &Memory) -> u16 {
-		let indirect = self.fetch(memory).wrapping_add(self.x);
+	fn fetch_x_indexed_zero_page_indirect_adress(&mut self, bus: &Bus) -> u16 {
+		let indirect = self.fetch(bus).wrapping_add(self.x);
 		
-		// Next memory loc must be on zero page
-		// Little endian in memory
-		(u16::from(memory.read(indirect.wrapping_add(1) as u16)) << 8) | u16::from(memory.read(indirect as u16))
+		// Next bus loc must be on zero page
+		// Little endian in bus
+		(u16::from(bus.read(indirect.wrapping_add(1) as u16)) << 8) | u16::from(bus.read(indirect as u16))
 	}
 
-	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, memory: &Memory) -> u16 {
-		let pointer = self.fetch(memory);
+	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, bus: &Bus) -> u16 {
+		let pointer = self.fetch(bus);
 
 		// Little endian
-		let lo = memory.read(pointer as u16) as u16;
-		let hi = memory.read(pointer.wrapping_add(1) as u16) as u16;
+		let lo = bus.read(pointer as u16) as u16;
+		let hi = bus.read(pointer.wrapping_add(1) as u16) as u16;
 		let indirect = lo | (hi << 8);
 		let adress = indirect.wrapping_add(self.y as u16);
 
@@ -585,88 +585,88 @@ impl Cpu {
 		}
 	}
 
-	fn get_op_adress(&mut self, memory: &Memory, addr_mode: &AddrMode) -> u16 {
+	fn get_op_adress(&mut self, bus: &Bus, addr_mode: &AddrMode) -> u16 {
 		match addr_mode {
 			AddrMode::Immediate => {
 				self.pc += 1; // Advance after the value
 				self.pc - 1			
 			},
-			AddrMode::Absolute => self.fetch_absolute_adress(memory),
-			AddrMode::XIndexedAbsolute => self.fetch_x_indexed_absolute_adress(memory),
-			AddrMode::YIndexedAbsolute => self.fetch_y_indexed_absolute_adress(memory),
-			AddrMode::AbsoluteIndirect => self.fetch_absolute_indirect_adress(memory),
-			AddrMode::ZeroPage => self.fetch_zero_page_adress(memory),
-			AddrMode::XIndexedZeroPage => self.fetch_x_indexed_zero_page_adress(memory),
-			AddrMode::YIndexedZeroPage => self.fetch_y_indexed_zero_page_adress(memory),
-			AddrMode::XIndexedZeroPageIndirect => self.fetch_x_indexed_zero_page_indirect_adress(memory),
-			AddrMode::ZeroPageIndirectYIndexed => self.fetch_zero_page_indirect_y_indexed_adress(memory),
-			AddrMode::Relative => self.fetch_relative(memory),
+			AddrMode::Absolute => self.fetch_absolute_adress(bus),
+			AddrMode::XIndexedAbsolute => self.fetch_x_indexed_absolute_adress(bus),
+			AddrMode::YIndexedAbsolute => self.fetch_y_indexed_absolute_adress(bus),
+			AddrMode::AbsoluteIndirect => self.fetch_absolute_indirect_adress(bus),
+			AddrMode::ZeroPage => self.fetch_zero_page_adress(bus),
+			AddrMode::XIndexedZeroPage => self.fetch_x_indexed_zero_page_adress(bus),
+			AddrMode::YIndexedZeroPage => self.fetch_y_indexed_zero_page_adress(bus),
+			AddrMode::XIndexedZeroPageIndirect => self.fetch_x_indexed_zero_page_indirect_adress(bus),
+			AddrMode::ZeroPageIndirectYIndexed => self.fetch_zero_page_indirect_y_indexed_adress(bus),
+			AddrMode::Relative => self.fetch_relative(bus),
 			_ => {
 				panic!("Adress mode '{:?}' not usable to get adress", addr_mode);
 			}
 		}
 	}
 
-	fn execute(&mut self, memory: &mut Memory, instruction: &Instruction, addr_mode: &AddrMode) {
+	fn execute(&mut self, bus: &mut Bus, instruction: &Instruction, addr_mode: &AddrMode) {
 		match instruction {
-			Instruction::Adc => self.apply_adc_op(memory, addr_mode),
-			Instruction::And => self.apply_and_op(memory, addr_mode),
+			Instruction::Adc => self.apply_adc_op(bus, addr_mode),
+			Instruction::And => self.apply_and_op(bus, addr_mode),
 			Instruction::Asl => {
 				if let AddrMode::Accumulator = addr_mode  {
 					self.apply_asl_accumulator_op();
 				}
 				else {
-					self.apply_asl_op(memory, addr_mode);
+					self.apply_asl_op(bus, addr_mode);
 				}				
 			},
-			Instruction::Bcc => self.apply_branch(memory, self.c == 0),
-			Instruction::Bcs => self.apply_branch(memory, self.c != 0),
-			Instruction::Beq => self.apply_branch(memory, self.z != 0),
-			Instruction::Bit => self.apply_bit_op(memory ,addr_mode),
-			Instruction::Bmi => self.apply_branch(memory, self.n != 0),
-			Instruction::Bne => self.apply_branch(memory, self.z == 0),
-			Instruction::Bpl => self.apply_branch(memory, self.n == 0),
-			Instruction::Brk => self.apply_brk_op(memory),
-			Instruction::Bvc => self.apply_branch(memory, self.v == 0),
-			Instruction::Bvs => self.apply_branch(memory, self.v != 0),
+			Instruction::Bcc => self.apply_branch(bus, self.c == 0),
+			Instruction::Bcs => self.apply_branch(bus, self.c != 0),
+			Instruction::Beq => self.apply_branch(bus, self.z != 0),
+			Instruction::Bit => self.apply_bit_op(bus ,addr_mode),
+			Instruction::Bmi => self.apply_branch(bus, self.n != 0),
+			Instruction::Bne => self.apply_branch(bus, self.z == 0),
+			Instruction::Bpl => self.apply_branch(bus, self.n == 0),
+			Instruction::Brk => self.apply_brk_op(bus),
+			Instruction::Bvc => self.apply_branch(bus, self.v == 0),
+			Instruction::Bvs => self.apply_branch(bus, self.v != 0),
 			Instruction::Clc => self.c = 0,
 			Instruction::Cld => self.d = 0,
 			Instruction::Cli => self.i = 0,
 			Instruction::Clv => self.v = 0,
-			Instruction::Cmp => self.apply_cmp_op( self.a, memory, addr_mode),
-			Instruction::Cpx => self.apply_cmp_op( self.x, memory, addr_mode),
-			Instruction::Cpy => self.apply_cmp_op( self.y, memory, addr_mode),
-			Instruction::Dec => self.apply_dec_op(memory, addr_mode),
+			Instruction::Cmp => self.apply_cmp_op( self.a, bus, addr_mode),
+			Instruction::Cpx => self.apply_cmp_op( self.x, bus, addr_mode),
+			Instruction::Cpy => self.apply_cmp_op( self.y, bus, addr_mode),
+			Instruction::Dec => self.apply_dec_op(bus, addr_mode),
 			Instruction::Dex => self.apply_dex_op(),
 			Instruction::Dey => self.apply_dey_op(),
-			Instruction::Eor => self.apply_eor_op(memory, addr_mode),
-			Instruction::Inc => self.apply_inc_op(memory, addr_mode),
+			Instruction::Eor => self.apply_eor_op(bus, addr_mode),
+			Instruction::Inc => self.apply_inc_op(bus, addr_mode),
 			Instruction::Inx => self.apply_inx_op(),
 			Instruction::Iny => self.apply_iny_op(),
-			Instruction::Jmp => self.pc = self.get_op_adress(memory, addr_mode),
-			Instruction::Jsr => self.apply_jsr_op(memory, addr_mode),
-			Instruction::Lda => self.a = self.apply_ld_op(memory, addr_mode),
-			Instruction::Ldx => self.x = self.apply_ld_op(memory, addr_mode),
-			Instruction::Ldy => self.y = self.apply_ld_op(memory, addr_mode),
+			Instruction::Jmp => self.pc = self.get_op_adress(bus, addr_mode),
+			Instruction::Jsr => self.apply_jsr_op(bus, addr_mode),
+			Instruction::Lda => self.a = self.apply_ld_op(bus, addr_mode),
+			Instruction::Ldx => self.x = self.apply_ld_op(bus, addr_mode),
+			Instruction::Ldy => self.y = self.apply_ld_op(bus, addr_mode),
 			Instruction::Lsr => {
 				if let AddrMode::Accumulator = addr_mode {
 					self.apply_lsr_accumulator_op()
 				}
 				else {
-					self.apply_lsr_op(memory, addr_mode);
+					self.apply_lsr_op(bus, addr_mode);
 				}
 			},
-			Instruction::Ora => self.apply_ora_op(memory, addr_mode),
-			Instruction::Pha => self.apply_pha_op(memory),
-			Instruction::Php => self.apply_php_op(memory),
-			Instruction::Pla => self.apply_pla_op(memory),
-			Instruction::Plp => self.apply_plp_op(memory),
+			Instruction::Ora => self.apply_ora_op(bus, addr_mode),
+			Instruction::Pha => self.apply_pha_op(bus),
+			Instruction::Php => self.apply_php_op(bus),
+			Instruction::Pla => self.apply_pla_op(bus),
+			Instruction::Plp => self.apply_plp_op(bus),
 			Instruction::Rol => {
 				if let AddrMode::Accumulator = addr_mode {
 					self.apply_rol_accumulator_op();
 				}
 				else {
-					self.apply_rol_op(memory, addr_mode);
+					self.apply_rol_op(bus, addr_mode);
 				}
 			},
 			Instruction::Ror => {
@@ -674,18 +674,18 @@ impl Cpu {
 					self.apply_ror_accumulator_op();
 				}
 				else {
-					self.apply_ror_op(memory, addr_mode);
+					self.apply_ror_op(bus, addr_mode);
 				}
 			},
-			Instruction::Rti => self.apply_rti_op(memory),
-			Instruction::Rts => self.apply_rts_op(memory),
-			Instruction::Sbc => self.apply_sbc_op(memory, addr_mode),
+			Instruction::Rti => self.apply_rti_op(bus),
+			Instruction::Rts => self.apply_rts_op(bus),
+			Instruction::Sbc => self.apply_sbc_op(bus, addr_mode),
 			Instruction::Sec => self.c = 1,
 			Instruction::Sed => self.d = 1,
 			Instruction::Sei => self.i = 1,
-			Instruction::Sta => memory.write(self.get_op_adress(memory, addr_mode), self.a),
-			Instruction::Stx => memory.write(self.get_op_adress(memory, addr_mode), self.x),
-			Instruction::Sty => memory.write(self.get_op_adress(memory, addr_mode), self.y),
+			Instruction::Sta => bus.write(self.get_op_adress(bus, addr_mode), self.a),
+			Instruction::Stx => bus.write(self.get_op_adress(bus, addr_mode), self.x),
+			Instruction::Sty => bus.write(self.get_op_adress(bus, addr_mode), self.y),
 			Instruction::Tax => {
 				self.x = self.a;
 				self.z = u8::from(self.x == 0);
@@ -719,19 +719,19 @@ impl Cpu {
 			//Undocumented opcode
 			Instruction::Dop => self.pc += 1, // Skip args
 			Instruction::Top => self.pc += 2,
-			Instruction::Lax => self.apply_lax_op(memory, addr_mode),
-			Instruction::Sax => self.apply_sax_op(memory, addr_mode),
-			Instruction::Dcp => self.apply_dcp_op(memory, addr_mode),
-			Instruction::Isb => self.apply_isb_op(memory, addr_mode),
-			Instruction::Slo => self.apply_slo_op(memory, addr_mode),
-			Instruction::Sre => self.apply_sre_op(memory, addr_mode),
-			Instruction::Rla => self.apply_rla_op(memory, addr_mode),
-			Instruction::Rra => self.apply_rra_op(memory, addr_mode),
+			Instruction::Lax => self.apply_lax_op(bus, addr_mode),
+			Instruction::Sax => self.apply_sax_op(bus, addr_mode),
+			Instruction::Dcp => self.apply_dcp_op(bus, addr_mode),
+			Instruction::Isb => self.apply_isb_op(bus, addr_mode),
+			Instruction::Slo => self.apply_slo_op(bus, addr_mode),
+			Instruction::Sre => self.apply_sre_op(bus, addr_mode),
+			Instruction::Rla => self.apply_rla_op(bus, addr_mode),
+			Instruction::Rra => self.apply_rra_op(bus, addr_mode),
 		}	
 	}
 
-	fn apply_branch(&mut self, memory: &Memory, condition: bool) {
-		let adress = self.fetch_relative(memory); // Advance the pc
+	fn apply_branch(&mut self, bus: &Bus, condition: bool) {
+		let adress = self.fetch_relative(bus); // Advance the pc
 
 		if condition {
 			self.extra_cycle = 1 + u8::from(Cpu::is_crossing(self.pc, adress));
@@ -740,16 +740,16 @@ impl Cpu {
 		}
 	}
 
-	fn apply_adc_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_adc_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 
 		self.add_to_accumulator(value);
 	}
 
-	fn apply_and_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_and_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = self.a & value;
 
 		self.z = u8::from(result == 0);
@@ -769,9 +769,9 @@ impl Cpu {
 		self.a = result;
 	}
 
-	fn apply_asl_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_asl_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		self.c = (value & 0x80) >> 7;
 
 		let result = (value & 0x7F) << 1;
@@ -779,49 +779,49 @@ impl Cpu {
 		self.n = result >> 7;
 		self.z = u8::from(result == 0);
 
-		memory.write(adress, result);
+		bus.write(adress, result);
 	}
 
-	fn apply_bit_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_bit_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		self.n = value >> 7;
 		self.v = (value & 0x40) >> 6;
 
 		self.z = u8::from((self.a & value) == 0);
 	}
 
-	fn apply_brk_op(&mut self, memory: &mut Memory) {
+	fn apply_brk_op(&mut self, bus: &mut Bus) {
 		self.pc += 2;
 		let low_pc = u8::try_from(self.pc & 0x00FF).unwrap();
 		let high_pc = u8::try_from((self.pc & 0xFF00) >> 8).unwrap();
 
-		self.stack_push(memory, high_pc);
-		self.stack_push(memory, low_pc);
+		self.stack_push(bus, high_pc);
+		self.stack_push(bus, low_pc);
 		//let p = self.get_status();
-		//self.stack_push(memory, p);
+		//self.stack_push(bus, p);
 
-		self.pc = memory.read_u16(0xFFFE);
+		self.pc = bus.read_u16(0xFFFE);
 	}
 
-	fn apply_cmp_op(&mut self, register: u8, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_cmp_op(&mut self, register: u8, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let (result, underflow) = register.overflowing_sub(value);
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
 		self.c = u8::from(!underflow);
 	}
 
-	fn apply_dec_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_dec_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = value.wrapping_sub(1);
 
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
 
-		memory.write(adress, result);
+		bus.write(adress, result);
 	}
 
 	fn apply_dex_op(&mut self) {
@@ -842,9 +842,9 @@ impl Cpu {
 		self.y = result;
 	}
 
-	fn apply_eor_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_eor_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = self.a ^ value;
 
 		self.z = u8::from(result == 0);
@@ -853,15 +853,15 @@ impl Cpu {
 		self.a = result;
 	}
 
-	fn apply_inc_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_inc_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let (result, _) = value.overflowing_add(1);
 
 		self.z = u8::from(result == 0);
 		self.n = result >> 7;
 
-		memory.write(adress, result);
+		bus.write(adress, result);
 	}
 
 	fn apply_inx_op(&mut self) {
@@ -882,20 +882,20 @@ impl Cpu {
 		self.y = result;
 	}
 
-	fn apply_jsr_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
+	fn apply_jsr_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
 		let low_pc = u8::try_from((self.pc - 1) & 0x00FF).unwrap();
 		let high_pc = u8::try_from(((self.pc - 1) & 0xFF00) >> 8).unwrap();
 
-		self.stack_push(memory, high_pc);
-		self.stack_push(memory, low_pc);
+		self.stack_push(bus, high_pc);
+		self.stack_push(bus, low_pc);
 
 		self.pc = adress;
 	}
 
-	fn apply_ld_op(&mut self, memory: &Memory, addr_mode: &AddrMode) -> u8 {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_ld_op(&mut self, bus: &Bus, addr_mode: &AddrMode) -> u8 {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		self.z = u8::from(value == 0);
 		self.n = value >> 7;
 
@@ -912,21 +912,21 @@ impl Cpu {
 		self.a = result;
 	}
 
-	fn apply_lsr_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_lsr_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		self.c = value & 0x01;
 		self.n = 0;
 
 		let result = value >> 1;
 		self.z = u8::from(result == 0);
 
-		memory.write(adress, result);
+		bus.write(adress, result);
 	}
 
-	fn apply_ora_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_ora_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = value | self.a;
 
 		self.z = u8::from(result == 0);
@@ -935,25 +935,25 @@ impl Cpu {
 		self.a = result;
 	}
 
-	fn apply_pha_op(&mut self, memory: &mut Memory) {
-		self.stack_push(memory, self.a);
+	fn apply_pha_op(&mut self, bus: &mut Bus) {
+		self.stack_push(bus, self.a);
 	}
 
-	fn apply_php_op(&mut self, memory: &mut Memory) {
+	fn apply_php_op(&mut self, bus: &mut Bus) {
 		let p = self.get_status();
 		
-		self.stack_push(memory, p | 0b0001_0000); // Set B
+		self.stack_push(bus, p | 0b0001_0000); // Set B
 	}
 
-	fn apply_pla_op(&mut self, memory: &Memory) {
-		self.a = self.stack_pop(memory);
+	fn apply_pla_op(&mut self, bus: &Bus) {
+		self.a = self.stack_pop(bus);
 
 		self.z = u8::from(self.a == 0);
 		self.n = self.a >> 7;
 	}
 
-	fn apply_plp_op(&mut self, memory: &Memory) {
-		let p = self.stack_pop(memory);
+	fn apply_plp_op(&mut self, bus: &Bus) {
+		let p = self.stack_pop(bus);
 
 		self.set_status(p & 0b1110_1111); // Remove B
 	}
@@ -967,15 +967,15 @@ impl Cpu {
 		self.a = result;
 	}
 
-	fn apply_rol_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_rol_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = (value << 1) + self.c;
 		self.c = value >> 7;
 		self.n = (value & 0x40) >> 6;
 		self.z = u8::from(result == 0);
 
-		memory.write(adress, result);
+		bus.write(adress, result);
 	}
 
 	fn apply_ror_accumulator_op(&mut self) {
@@ -987,36 +987,36 @@ impl Cpu {
 		self.a = result;
 	}
 
-	fn apply_ror_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_ror_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = (self.c << 7) + (value >> 1);
 		self.n = self.c;
 		self.c = value & 0x01;
 		self.z = u8::from(result == 0);
 
-		memory.write(adress, result);
+		bus.write(adress, result);
 	}
 
-	fn apply_rti_op(&mut self, memory: &Memory) {
-		let p = self.stack_pop(memory);
-		let low_pc = u16::from(self.stack_pop(memory));
-		let high_pc = u16::from(self.stack_pop(memory));
+	fn apply_rti_op(&mut self, bus: &Bus) {
+		let p = self.stack_pop(bus);
+		let low_pc = u16::from(self.stack_pop(bus));
+		let high_pc = u16::from(self.stack_pop(bus));
 
 		self.pc = (high_pc << 8) + low_pc;
 		self.set_status(p);
 	}
 
-	fn apply_rts_op(&mut self, memory: &Memory) {
-		let low_pc = u16::from(self.stack_pop(memory));
-		let high_pc = u16::from(self.stack_pop(memory));
+	fn apply_rts_op(&mut self, bus: &Bus) {
+		let low_pc = u16::from(self.stack_pop(bus));
+		let high_pc = u16::from(self.stack_pop(bus));
 
 		self.pc = (high_pc << 8) + low_pc + 1;
 	}
 
-	fn apply_sbc_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_sbc_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 
 		self.sub_to_accumulator(value);
 	}
@@ -1037,9 +1037,9 @@ impl Cpu {
 		self.add_to_accumulator((value as i8).wrapping_neg().wrapping_sub(1) as u8);
 	}
 
-	fn apply_lax_op(&mut self, memory: &Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_lax_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 
 		self.a = value;
 		self.x = value;
@@ -1048,21 +1048,21 @@ impl Cpu {
 		self.z = u8::from(value == 0);
 	}
 
-	fn apply_sax_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
+	fn apply_sax_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
 		
 		let result = self.x & self.a;
-		memory.write(adress, result);
+		bus.write(adress, result);
 
 		//self.n = result >> 7;
 		//self.z = u8::from(result == 0);
 	}
 
-	fn apply_dcp_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let mut value = memory.read(adress);
+	fn apply_dcp_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let mut value = bus.read(adress);
 		value = value.wrapping_sub(1);
-		memory.write(adress, value);
+		bus.write(adress, value);
 		
 		let result = self.a.wrapping_sub(value);
 		self.z = u8::from(result == 0);
@@ -1070,20 +1070,20 @@ impl Cpu {
 		self.c = u8::from(value <= self.a);
 	}
 
-	fn apply_isb_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let mut value = memory.read(adress);
+	fn apply_isb_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let mut value = bus.read(adress);
 		value = value.wrapping_add(1);
-		memory.write(adress, value);
+		bus.write(adress, value);
 		
 		self.sub_to_accumulator(value);
 	}
 
-	fn apply_slo_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_slo_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = value << 1;
-		memory.write(adress, result);
+		bus.write(adress, result);
 
 		self.a = self.a | result;
 		self.z = u8::from(self.a == 0);
@@ -1091,11 +1091,11 @@ impl Cpu {
 		self.c = value >> 7;
 	}
 
-	fn apply_sre_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_sre_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = value >> 1;
-		memory.write(adress, result);
+		bus.write(adress, result);
 
 		self.c = value & 0x01;
 		// EOR
@@ -1104,11 +1104,11 @@ impl Cpu {
 		self.n = self.a >> 7;
 	}
 
-	fn apply_rla_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_rla_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = value << 1 | (self.c & 0x01);
-		memory.write(adress, result);
+		bus.write(adress, result);
 
 		self.a = self.a & result;
 		self.z = u8::from(self.a == 0);
@@ -1116,11 +1116,11 @@ impl Cpu {
 		self.c = value >> 7;
 	}
 
-	fn apply_rra_op(&mut self, memory: &mut Memory, addr_mode: &AddrMode) {
-		let adress = self.get_op_adress(memory, addr_mode);
-		let value = memory.read(adress);
+	fn apply_rra_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
+		let adress = self.get_op_adress(bus, addr_mode);
+		let value = bus.read(adress);
 		let result = (self.c << 7) | (value >> 1);
-		memory.write(adress, result);
+		bus.write(adress, result);
 
 		self.c = value & 0x01;
 
@@ -1128,10 +1128,10 @@ impl Cpu {
 	}
 }
 
-pub fn trace(cpu: &mut Cpu, memory: &Memory) -> String {
+pub fn trace(cpu: &mut Cpu, bus: &Bus) -> String {
 	let pc = cpu.pc;
 	
-	let opcode = cpu.fetch(memory);
+	let opcode = cpu.fetch(bus);
 
 	let (instr, addr_mode, size, _) = cpu.decode(opcode);
 
@@ -1142,41 +1142,41 @@ pub fn trace(cpu: &mut Cpu, memory: &Memory) -> String {
 			_ => String::from("")
 		},
 		2 => {
-			let arg = memory.read(pc + 1);
+			let arg = bus.read(pc + 1);
 			hex_codes.push(arg);
 
-			let adress = cpu.get_op_adress(memory, &addr_mode);
+			let adress = cpu.get_op_adress(bus, &addr_mode);
 			match addr_mode {
 				AddrMode::Immediate => format!("#${:02x}", arg),
-				AddrMode::ZeroPage => format!("${:02x} = {:02x}", arg, memory.read(adress)),
-				AddrMode::XIndexedZeroPage => format!("${:02x},X @ {:02x} = {:02x}", arg, adress, memory.read(adress)),
-				AddrMode::YIndexedZeroPage => format!("${:02x},Y @ {:02x} = {:02x}", arg, adress, memory.read(adress)),
-				AddrMode::XIndexedZeroPageIndirect => format!("(${:02x},X) @ {:02x} = {:04x} = {:02x}", arg, cpu.x.wrapping_add(arg), adress, memory.read(adress)),
+				AddrMode::ZeroPage => format!("${:02x} = {:02x}", arg, bus.read(adress)),
+				AddrMode::XIndexedZeroPage => format!("${:02x},X @ {:02x} = {:02x}", arg, adress, bus.read(adress)),
+				AddrMode::YIndexedZeroPage => format!("${:02x},Y @ {:02x} = {:02x}", arg, adress, bus.read(adress)),
+				AddrMode::XIndexedZeroPageIndirect => format!("(${:02x},X) @ {:02x} = {:04x} = {:02x}", arg, cpu.x.wrapping_add(arg), adress, bus.read(adress)),
 				AddrMode::ZeroPageIndirectYIndexed => {
-					let lo = u16::from(memory.read(arg as u16));
-					let hi = u16::from(memory.read(arg.wrapping_add(1) as u16));
+					let lo = u16::from(bus.read(arg as u16));
+					let hi = u16::from(bus.read(arg.wrapping_add(1) as u16));
 					let indirect = lo + (hi << 8);
-					format!("(${:02x}),Y = {:04x} @ {:04x} = {:02x}", arg, indirect, adress, memory.read(adress))
+					format!("(${:02x}),Y = {:04x} @ {:04x} = {:02x}", arg, indirect, adress, bus.read(adress))
 				},
 				AddrMode::Relative =>  format!("${:04x}", adress),
 				_ => panic!("Unexpected addressing mode {:?} with instruction's size {}", addr_mode, size)
 			}
 		},
 		3 => {
-			let lo_byte = memory.read(pc + 1);
-			let hi_byte = memory.read(pc + 2);
+			let lo_byte = bus.read(pc + 1);
+			let hi_byte = bus.read(pc + 2);
 			hex_codes.push(lo_byte);
 			hex_codes.push(hi_byte);
 			let arg = u16::from(lo_byte) + (u16::from(hi_byte) << 8);
 
-			let adress = cpu.get_op_adress(memory, &addr_mode);
+			let adress = cpu.get_op_adress(bus, &addr_mode);
 			match addr_mode {
 				AddrMode::Absolute => match instr {
 					Instruction::Jmp | Instruction::Jsr => format!("${:04x}", adress),
-					_ => format!("${:04x} = {:02x}", adress, memory.read(adress))
+					_ => format!("${:04x} = {:02x}", adress, bus.read(adress))
 				},
-				AddrMode::XIndexedAbsolute => format!("${:04x},X @ {:04x} = {:02x}", arg, adress, memory.read(adress)),
-				AddrMode::YIndexedAbsolute => format!("${:04x},Y @ {:04x} = {:02x}", arg, adress, memory.read(adress)),
+				AddrMode::XIndexedAbsolute => format!("${:04x},X @ {:04x} = {:02x}", arg, adress, bus.read(adress)),
+				AddrMode::YIndexedAbsolute => format!("${:04x},Y @ {:04x} = {:02x}", arg, adress, bus.read(adress)),
 				AddrMode::AbsoluteIndirect => format!("(${:04x}) = {:04x}", arg, adress),
 				_ => panic!("Unexpected addressing mode {:?} with instruction's size {}", addr_mode, size)
 			}
@@ -1200,7 +1200,7 @@ pub fn trace(cpu: &mut Cpu, memory: &Memory) -> String {
 
 #[cfg(test)]
 mod tests {
-	use crate::mapper::test;
+	use crate::rom::test;
 
 	use super::*;
 
@@ -1214,8 +1214,8 @@ mod tests {
 	#[test]
     fn test_lda_immediate() {
         let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
-		cpu.load_and_run(&mut memory, &vec![0xa9, 0x05, 0x00]);
+		let mut bus = Bus::new(test::test_rom());
+		cpu.load_and_run(&mut bus, &vec![0xa9, 0x05, 0x00]);
         assert_eq!(cpu.a, 5);
         assert!(cpu.get_status() & 0b0000_0010 == 0b00);
         assert!(cpu.get_status() & 0b1000_0000 == 0);
@@ -1224,10 +1224,10 @@ mod tests {
 	#[test]
     fn test_lda_absolute() {
         let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
-		memory.write(0x0710, 0x55);
+		let mut bus = Bus::new(test::test_rom());
+		bus.write(0x0710, 0x55);
 
-		cpu.load_and_run(&mut memory, &vec![0xad, 0x10, 0x07, 0x00]);
+		cpu.load_and_run(&mut bus, &vec![0xad, 0x10, 0x07, 0x00]);
 		
         assert_eq!(cpu.a, 0x55);
     }
@@ -1235,10 +1235,10 @@ mod tests {
 	#[test]
     fn test_lda_zero_page() {
         let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
-        memory.write(0x10, 0x55);
+		let mut bus = Bus::new(test::test_rom());
+        bus.write(0x10, 0x55);
 
-        cpu.load_and_run(&mut memory, &vec![0xa5, 0x10, 0x00]);
+        cpu.load_and_run(&mut bus, &vec![0xa5, 0x10, 0x00]);
 
         assert_eq!(cpu.a, 0x55);
     }
@@ -1246,9 +1246,9 @@ mod tests {
 	#[test]
     fn test_tax() {
 		let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
+		let mut bus = Bus::new(test::test_rom());
         cpu.a = 10;
-        cpu.load_and_run(&mut memory,&vec![0xaa, 0x00]);
+        cpu.load_and_run(&mut bus,&vec![0xaa, 0x00]);
 
         assert_eq!(cpu.x, 10)
     }
@@ -1257,13 +1257,13 @@ mod tests {
 	fn test_adc_x_indexed_zero_page() {
 		// TODO: need more testing on flags
 		let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
+		let mut bus = Bus::new(test::test_rom());
 		
-		memory.write(0x15, 0x20);
+		bus.write(0x15, 0x20);
 		cpu.x = 0x05;
 		cpu.a = 0x01;
         // x indexed zero page
-		cpu.load_and_run(&mut memory,&vec![0x75, 0x10, 0x00]);
+		cpu.load_and_run(&mut bus,&vec![0x75, 0x10, 0x00]);
 		
 		assert_eq!(cpu.a, 0x21);
 		assert_eq!(cpu.c, 0);
@@ -1272,20 +1272,20 @@ mod tests {
 	#[test]
 	fn test_cmp_immediate() {
 		let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
+		let mut bus = Bus::new(test::test_rom());
 		cpu.a = 0x10; // Set accumulator
 
-		cpu.load_and_run(&mut memory,&vec![0xC9, 0x10, 0x00]);
+		cpu.load_and_run(&mut bus,&vec![0xC9, 0x10, 0x00]);
 		assert_eq!(cpu.z, 1);
 		assert_eq!(cpu.c, 1);
 		assert_eq!(cpu.n, 0);
 
-		cpu.load_and_run(&mut memory,&vec![0xC9, 0x09, 0x00]);
+		cpu.load_and_run(&mut bus,&vec![0xC9, 0x09, 0x00]);
 		assert_eq!(cpu.z, 0);
 		assert_eq!(cpu.c, 1);
 		assert_eq!(cpu.n, 0);
 
-		cpu.load_and_run(&mut memory,&vec![0xC9, 0x11, 0x00]);
+		cpu.load_and_run(&mut bus,&vec![0xC9, 0x11, 0x00]);
 		assert_eq!(cpu.z, 0);
 		assert_eq!(cpu.c, 0);
 		assert_eq!(cpu.n, 1);
@@ -1296,10 +1296,10 @@ mod tests {
 	#[test]
 	fn test_lsr_accumulator() {
 		let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
+		let mut bus = Bus::new(test::test_rom());
 		
 		cpu.a = 0x01;
-		cpu.load_and_run(&mut memory,&vec![0x4A, 0x00]);
+		cpu.load_and_run(&mut bus,&vec![0x4A, 0x00]);
 		assert_eq!(cpu.a, 0x00);
 		assert_eq!(cpu.c, 1);
 		assert_eq!(cpu.z, 1);
@@ -1308,11 +1308,11 @@ mod tests {
 	#[test]
 	fn test_rol_absolute() {
 		let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
-		memory.write(0x0110, 0xA2); // 1010 0010
+		let mut bus = Bus::new(test::test_rom());
+		bus.write(0x0110, 0xA2); // 1010 0010
 
-		cpu.load_and_run(&mut memory,&vec![0x2E, 0x10, 0x01, 0x00]);
-		assert_eq!(memory.read(0x0110), 0x44); // 0100 0100
+		cpu.load_and_run(&mut bus,&vec![0x2E, 0x10, 0x01, 0x00]);
+		assert_eq!(bus.read(0x0110), 0x44); // 0100 0100
 		assert_eq!(cpu.c, 1);
 		assert_eq!(cpu.n, 0);
 		assert_eq!(cpu.z, 0);
@@ -1321,11 +1321,11 @@ mod tests {
 	#[test]
 	fn test_ror_absolute() {
 		let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
-		memory.write(0x0110, 0xA2); // 1010 0010
+		let mut bus = Bus::new(test::test_rom());
+		bus.write(0x0110, 0xA2); // 1010 0010
 
-		cpu.load_and_run(&mut memory,&vec![0x6E, 0x10, 0x01, 0x00]);
-		assert_eq!(memory.read(0x0110), 0x51); //  0101 0001
+		cpu.load_and_run(&mut bus,&vec![0x6E, 0x10, 0x01, 0x00]);
+		assert_eq!(bus.read(0x0110), 0x51); //  0101 0001
 		assert_eq!(cpu.c, 0);
 		assert_eq!(cpu.n, 0);
 		assert_eq!(cpu.z, 0);
@@ -1334,9 +1334,9 @@ mod tests {
 	#[test]
     fn test_inx_overflow() {
         let mut cpu = Cpu::new();
-		let mut memory = Memory::new(test::test_mapper());
+		let mut bus = Bus::new(test::test_rom());
         cpu.x = 0xff;
-        cpu.load_and_run(&mut memory, &vec![0xe8, 0xe8, 0x00]);
+        cpu.load_and_run(&mut bus, &vec![0xe8, 0xe8, 0x00]);
 
         assert_eq!(cpu.x, 1)
     }
@@ -1345,8 +1345,8 @@ mod tests {
     fn test_lda_tax_inx() {
         let mut cpu = Cpu::new();
 		// lda, tax, inx
-		let mut memory = Memory::new(test::test_mapper());
-        cpu.load_and_run(&mut memory, &vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
+		let mut bus = Bus::new(test::test_rom());
+        cpu.load_and_run(&mut bus, &vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
 
         assert_eq!(cpu.x, 0xc1)
     }

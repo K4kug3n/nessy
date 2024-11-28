@@ -1,4 +1,4 @@
-use crate::mapper::Mapper;
+use crate::rom::Rom;
 
 const RAM: u16 = 0x0000;
 const RAM_MIRROR_END: u16 = 0x1FFF;
@@ -7,16 +7,16 @@ const PPU_MIRROR_END: u16 = 0x3FFF;
 const CARTRIDGE: u16 = 0x4020;
 const CARTRIDGE_END: u16 = 0xFFFF;
 
-pub struct Memory {
+pub struct Bus {
 	cpu_ram: [u8; 2048],
-	mapper: Box<dyn Mapper>
+	rom: Rom
 }
 
-impl Memory {
-	pub fn new(mapper: Box<dyn Mapper>) -> Memory {
-		Memory {
+impl Bus {
+	pub fn new(rom: Rom) -> Bus {
+		Bus {
 			cpu_ram: [0; 2048],
-			mapper
+			rom
 		}
 	}
 
@@ -29,7 +29,7 @@ impl Memory {
 				panic!("PPU not implemented");
 			},
 			CARTRIDGE..=CARTRIDGE_END => {
-				self.mapper.read(adress)
+				self.rom.mapper.read(adress)
 			},
 			_ => panic!("{} not adressed in cpu", adress)
 		}
@@ -52,7 +52,7 @@ impl Memory {
 				panic!("PPU not implemented");
 			},
 			CARTRIDGE..=CARTRIDGE_END => {
-				self.mapper.write(adress, value);
+				self.rom.mapper.write(adress, value);
 			},
 			_ => panic!("{} not adressed in cpu", adress)
 		}
@@ -65,40 +65,44 @@ impl Memory {
 		self.write(adress, low);
 		self.write(adress + 1, high);
 	}
+
+	pub fn read_chr_rom(&self, adress: u16) -> u8 {
+		self.rom.mapper.read_chr_rom(adress)
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 
-	use crate::mapper::nrom::Nrom;
+	use crate::rom::test;
 
 	#[test]
 	fn cpu_write_and_read() {
-		let mut memory = Memory::new(Box::new(Nrom::new(Vec::new(), Vec::new())));
+		let mut bus = Bus::new(test::test_rom());
 
-		memory.write(0x06e2, 0x25);
-		assert_eq!(memory.read(0x06e2), 0x25);
-		memory.write(0x06e3, 0x10);
-		assert_eq!(memory.read(0x06e3), 0x10);
-		memory.write(0x06e1, 0x07);
-		assert_eq!(memory.read(0x06e1), 0x07);
+		bus.write(0x06e2, 0x25);
+		assert_eq!(bus.read(0x06e2), 0x25);
+		bus.write(0x06e3, 0x10);
+		assert_eq!(bus.read(0x06e3), 0x10);
+		bus.write(0x06e1, 0x07);
+		assert_eq!(bus.read(0x06e1), 0x07);
 
-		assert_eq!(memory.read(0x06e2), 0x25);
+		assert_eq!(bus.read(0x06e2), 0x25);
 	}
 
 	#[test]
 	fn cpu_mirroring() {
-		let mut memory = Memory::new(Box::new(Nrom::new(Vec::new(), Vec::new())));
+		let mut bus = Bus::new(test::test_rom());
 
-		memory.write(0x0000, 0x17);
-		assert_eq!(memory.read(0x0800), 0x17);
-		assert_eq!(memory.read(0x1000), 0x17);
-		assert_eq!(memory.read(0x1800), 0x17);
+		bus.write(0x0000, 0x17);
+		assert_eq!(bus.read(0x0800), 0x17);
+		assert_eq!(bus.read(0x1000), 0x17);
+		assert_eq!(bus.read(0x1800), 0x17);
 
-		memory.write(0x0820, 0x07);
-		assert_eq!(memory.read(0x0020), 0x07);
-		assert_eq!(memory.read(0x1020), 0x07);
-		assert_eq!(memory.read(0x1820), 0x07);
+		bus.write(0x0820, 0x07);
+		assert_eq!(bus.read(0x0020), 0x07);
+		assert_eq!(bus.read(0x1020), 0x07);
+		assert_eq!(bus.read(0x1820), 0x07);
 	}
 }
