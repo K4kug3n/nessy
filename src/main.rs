@@ -12,13 +12,13 @@ fn main() {
     file.read_to_end(&mut buffer).expect("Could not read bytes");
 
     let rom = Rom::from_ines(&buffer);
-    let mut memory = Bus::new(rom);
+    let mut bus = Bus::new(rom);
 
     let mut cpu = Cpu::new();
-    cpu.reset(&mut memory);
+    cpu.reset(&mut bus);
     cpu.pc = 0xC000;
 
-    cpu.run_with_callback(&mut memory, |cpu, memory| {
-        println!("{}", trace(cpu, memory));
+    cpu.run_with_callback(&mut bus, |cpu: &mut Cpu, bus: &mut Bus| {
+        println!("{}", trace(cpu, bus));
     });
 }

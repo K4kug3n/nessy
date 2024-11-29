@@ -157,10 +157,10 @@ impl Cpu {
 
 	pub fn run_with_callback<F>(&mut self, bus: &mut Bus, mut callback: F) 
 	where 
-		F: FnMut(&mut Cpu, &Bus),
+		F: FnMut(&mut Cpu, &mut Bus),
 	{
 		loop {
-			callback(self, &bus);
+			callback(self, bus);
 
 			let opcode = self.fetch(bus);
 
@@ -192,7 +192,7 @@ impl Cpu {
 		self.sp -= 1;
 	}
 
-	fn stack_pop(&mut self, bus: &Bus) -> u8 {
+	fn stack_pop(&mut self, bus: &mut Bus) -> u8 {
 		self.sp += 1;
 		
 		bus.read(0x0100 + u16::from(self.sp))
@@ -216,13 +216,13 @@ impl Cpu {
 		(origin & 0xFF00) != (next & 0xFF00)
 	}
 
-	fn fetch(&mut self, bus: &Bus) -> u8 {
+	fn fetch(&mut self, bus: &mut Bus) -> u8 {
 		let value = bus.read(self.pc);
 		self.pc += 1;
 		value
 	}
 
-	fn fetch_relative(&mut self, bus: &Bus) -> u16 {
+	fn fetch_relative(&mut self, bus: &mut Bus) -> u16 {
 		let value = self.fetch(bus);
 
 		let mut offset = i32::from(value);
@@ -233,12 +233,12 @@ impl Cpu {
 		u16::try_from(i32::from(self.pc) + offset).unwrap()
 	}
 
-	fn fetch_absolute_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_absolute_adress(&mut self, bus: &mut Bus) -> u16 {
 		// Little endian
 		u16::from(self.fetch(bus)) + (u16::from(self.fetch(bus)) << 8)
 	}
 
-	fn fetch_absolute_indirect_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_absolute_indirect_adress(&mut self, bus: &mut Bus) -> u16 {
 		let low_indirect = self.fetch_absolute_adress(bus);
 
 		let high_indirect = (low_indirect & 0xFF00) + ((low_indirect + 1) & 0x00FF); // Do not increment page
@@ -246,7 +246,7 @@ impl Cpu {
 		u16::from(bus.read(low_indirect)) + (u16::from(bus.read(high_indirect)) << 8)
 	}
 
-	fn fetch_x_indexed_absolute_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_x_indexed_absolute_adress(&mut self, bus: &mut Bus) -> u16 {
 		let absolute = self.fetch_absolute_adress(bus);
 		let adress = absolute.wrapping_add(self.x as u16);
 
@@ -255,7 +255,7 @@ impl Cpu {
 		adress
 	}
 
-	fn fetch_y_indexed_absolute_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_y_indexed_absolute_adress(&mut self, bus: &mut Bus) -> u16 {
 		let absolute = self.fetch_absolute_adress(bus);
 		let adress = absolute.wrapping_add(self.y as u16);
 
@@ -264,19 +264,19 @@ impl Cpu {
 		adress
 	}
 
-	fn fetch_zero_page_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_zero_page_adress(&mut self, bus: &mut Bus) -> u16 {
 		u16::from(self.fetch(bus))
 	}
 
-	fn fetch_x_indexed_zero_page_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_x_indexed_zero_page_adress(&mut self, bus: &mut Bus) -> u16 {
 		self.fetch(bus).wrapping_add(self.x) as u16
 	}
 
-	fn fetch_y_indexed_zero_page_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_y_indexed_zero_page_adress(&mut self, bus: &mut Bus) -> u16 {
 		self.fetch(bus).wrapping_add(self.y) as u16
 	}
 
-	fn fetch_x_indexed_zero_page_indirect_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_x_indexed_zero_page_indirect_adress(&mut self, bus: &mut Bus) -> u16 {
 		let indirect = self.fetch(bus).wrapping_add(self.x);
 		
 		// Next bus loc must be on zero page
@@ -284,7 +284,7 @@ impl Cpu {
 		(u16::from(bus.read(indirect.wrapping_add(1) as u16)) << 8) | u16::from(bus.read(indirect as u16))
 	}
 
-	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, bus: &Bus) -> u16 {
+	fn fetch_zero_page_indirect_y_indexed_adress(&mut self, bus: &mut Bus) -> u16 {
 		let pointer = self.fetch(bus);
 
 		// Little endian
@@ -585,7 +585,7 @@ impl Cpu {
 		}
 	}
 
-	fn get_op_adress(&mut self, bus: &Bus, addr_mode: &AddrMode) -> u16 {
+	fn get_op_adress(&mut self, bus: &mut Bus, addr_mode: &AddrMode) -> u16 {
 		match addr_mode {
 			AddrMode::Immediate => {
 				self.pc += 1; // Advance after the value
@@ -683,9 +683,18 @@ impl Cpu {
 			Instruction::Sec => self.c = 1,
 			Instruction::Sed => self.d = 1,
 			Instruction::Sei => self.i = 1,
-			Instruction::Sta => bus.write(self.get_op_adress(bus, addr_mode), self.a),
-			Instruction::Stx => bus.write(self.get_op_adress(bus, addr_mode), self.x),
-			Instruction::Sty => bus.write(self.get_op_adress(bus, addr_mode), self.y),
+			Instruction::Sta => {
+				let adress = self.get_op_adress(bus, addr_mode);
+				bus.write(adress, self.a);
+			},
+			Instruction::Stx => {
+				let adress = self.get_op_adress(bus, addr_mode);
+				bus.write(adress, self.x);
+			},
+			Instruction::Sty => {
+				let adress = self.get_op_adress(bus, addr_mode);
+				bus.write(adress, self.y);
+			},
 			Instruction::Tax => {
 				self.x = self.a;
 				self.z = u8::from(self.x == 0);
@@ -730,7 +739,7 @@ impl Cpu {
 		}	
 	}
 
-	fn apply_branch(&mut self, bus: &Bus, condition: bool) {
+	fn apply_branch(&mut self, bus: &mut Bus, condition: bool) {
 		let adress = self.fetch_relative(bus); // Advance the pc
 
 		if condition {
@@ -740,14 +749,14 @@ impl Cpu {
 		}
 	}
 
-	fn apply_adc_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_adc_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 
 		self.add_to_accumulator(value);
 	}
 
-	fn apply_and_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_and_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 		let result = self.a & value;
@@ -782,7 +791,7 @@ impl Cpu {
 		bus.write(adress, result);
 	}
 
-	fn apply_bit_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_bit_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 		self.n = value >> 7;
@@ -804,7 +813,7 @@ impl Cpu {
 		self.pc = bus.read_u16(0xFFFE);
 	}
 
-	fn apply_cmp_op(&mut self, register: u8, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_cmp_op(&mut self, register: u8, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 		let (result, underflow) = register.overflowing_sub(value);
@@ -842,7 +851,7 @@ impl Cpu {
 		self.y = result;
 	}
 
-	fn apply_eor_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_eor_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 		let result = self.a ^ value;
@@ -893,7 +902,7 @@ impl Cpu {
 		self.pc = adress;
 	}
 
-	fn apply_ld_op(&mut self, bus: &Bus, addr_mode: &AddrMode) -> u8 {
+	fn apply_ld_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) -> u8 {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 		self.z = u8::from(value == 0);
@@ -924,7 +933,7 @@ impl Cpu {
 		bus.write(adress, result);
 	}
 
-	fn apply_ora_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_ora_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 		let result = value | self.a;
@@ -945,14 +954,14 @@ impl Cpu {
 		self.stack_push(bus, p | 0b0001_0000); // Set B
 	}
 
-	fn apply_pla_op(&mut self, bus: &Bus) {
+	fn apply_pla_op(&mut self, bus: &mut Bus) {
 		self.a = self.stack_pop(bus);
 
 		self.z = u8::from(self.a == 0);
 		self.n = self.a >> 7;
 	}
 
-	fn apply_plp_op(&mut self, bus: &Bus) {
+	fn apply_plp_op(&mut self, bus: &mut Bus) {
 		let p = self.stack_pop(bus);
 
 		self.set_status(p & 0b1110_1111); // Remove B
@@ -998,7 +1007,7 @@ impl Cpu {
 		bus.write(adress, result);
 	}
 
-	fn apply_rti_op(&mut self, bus: &Bus) {
+	fn apply_rti_op(&mut self, bus: &mut Bus) {
 		let p = self.stack_pop(bus);
 		let low_pc = u16::from(self.stack_pop(bus));
 		let high_pc = u16::from(self.stack_pop(bus));
@@ -1007,14 +1016,14 @@ impl Cpu {
 		self.set_status(p);
 	}
 
-	fn apply_rts_op(&mut self, bus: &Bus) {
+	fn apply_rts_op(&mut self, bus: &mut Bus) {
 		let low_pc = u16::from(self.stack_pop(bus));
 		let high_pc = u16::from(self.stack_pop(bus));
 
 		self.pc = (high_pc << 8) + low_pc + 1;
 	}
 
-	fn apply_sbc_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_sbc_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 
@@ -1037,7 +1046,7 @@ impl Cpu {
 		self.add_to_accumulator((value as i8).wrapping_neg().wrapping_sub(1) as u8);
 	}
 
-	fn apply_lax_op(&mut self, bus: &Bus, addr_mode: &AddrMode) {
+	fn apply_lax_op(&mut self, bus: &mut Bus, addr_mode: &AddrMode) {
 		let adress = self.get_op_adress(bus, addr_mode);
 		let value = bus.read(adress);
 
@@ -1128,7 +1137,7 @@ impl Cpu {
 	}
 }
 
-pub fn trace(cpu: &mut Cpu, bus: &Bus) -> String {
+pub fn trace(cpu: &mut Cpu, bus: &mut Bus) -> String {
 	let pc = cpu.pc;
 	
 	let opcode = cpu.fetch(bus);

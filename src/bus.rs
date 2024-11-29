@@ -1,32 +1,40 @@
-use crate::rom::Rom;
+use crate::{rom::Rom, ppu::Ppu};
 
 const RAM: u16 = 0x0000;
 const RAM_MIRROR_END: u16 = 0x1FFF;
-const PPU: u16 = 0x2000;
+const PPU_MIRROR: u16 = 0x2008;
 const PPU_MIRROR_END: u16 = 0x3FFF;
 const CARTRIDGE: u16 = 0x4020;
 const CARTRIDGE_END: u16 = 0xFFFF;
 
 pub struct Bus {
 	cpu_ram: [u8; 2048],
-	rom: Rom
+	rom: Rom,
+	ppu: Ppu
 }
 
 impl Bus {
 	pub fn new(rom: Rom) -> Bus {
+		let ppu = Ppu::new(rom.mirroring);
 		Bus {
 			cpu_ram: [0; 2048],
-			rom
+			rom,
+			ppu
 		}
 	}
 
-	pub fn read(&self, adress: u16) -> u8 {
+	pub fn read(&mut self, adress: u16) -> u8 {
 		match adress {
 			RAM..=RAM_MIRROR_END => {
 				self.cpu_ram[usize::from(adress & 0x07FF)]
 			},
-			PPU..=PPU_MIRROR_END => {
-				panic!("PPU not implemented");
+			0x2000 | 0x2001 | 0x2003 | 0x2005 | 0x2006 | 0x4014 => {
+                panic!("Attempt to read from write-only PPU address {:x}", adress);
+            }
+            0x2007 => self.ppu.read(&self.rom),
+			PPU_MIRROR..=PPU_MIRROR_END => {
+				let mirror_down_addr = adress & 0x2007;
+                self.read(mirror_down_addr)
 			},
 			CARTRIDGE..=CARTRIDGE_END => {
 				self.rom.mapper.read(adress)
@@ -36,7 +44,7 @@ impl Bus {
 		
 	}
 
-	pub fn read_u16(&self, adress: u16) -> u16 {
+	pub fn read_u16(&mut self, adress: u16) -> u16 {
 		let low = self.read(adress) as u16;
 		let high = self.read(adress + 1) as u16;
 		
@@ -48,8 +56,12 @@ impl Bus {
 			RAM..=RAM_MIRROR_END => {
 				self.cpu_ram[usize::from(adress & 0x07FF)] = value;
 			},
-			PPU..=PPU_MIRROR_END => {
-				panic!("PPU not implemented");
+			0x2000 => self.ppu.ctrl.write(value),
+            0x2006 => self.ppu.addr.write(value),
+            0x2007 => self.ppu.write(value),
+			PPU_MIRROR..=PPU_MIRROR_END => {
+				let mirror_down_addr = adress & 0x2007;
+                self.write(mirror_down_addr, value);
 			},
 			CARTRIDGE..=CARTRIDGE_END => {
 				self.rom.mapper.write(adress, value);

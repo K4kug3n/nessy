@@ -37,6 +37,10 @@ impl Mapper for Nrom {
 			_ => panic!("Undefined write mapping for {:#06x}", adress)
 		}
     }
+
+	fn read_chr_rom(&self, adress: u16) -> u8 {
+		self.chr_rom[adress as usize]
+	}
 }
 
 impl Nrom {

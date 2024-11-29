@@ -5,6 +5,8 @@ use nrom::Nrom;
 pub trait Mapper {
 	fn read(&self, adress: u16) -> u8;
 	fn write(&mut self, adress: u16, value: u8);
+
+	fn read_chr_rom(&self, adress: u16) -> u8;
 }
 
 impl dyn Mapper {
